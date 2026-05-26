@@ -2,8 +2,18 @@
 // 1. LLM passes body as OBJECT → CLI sees {"requests":[]} → dry-run returns body as object
 // 2. LLM passes body as STRING → CLI sees {"requests":[]} → dry-run returns body as object
 // Both paths must produce identical dry-run output.
+//
+// This test spawns the real `gws` binary via the MCP server. CI runners do not
+// have `gws` installed by default, so we exit 0 with a SKIP marker when it
+// isn't on PATH. Run locally to actually exercise the binary.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+
+const probe = spawnSync("gws", ["--version"], { stdio: "ignore" });
+if (probe.error || probe.status !== 0) {
+  console.log("SKIP: `gws` binary not on PATH — integration test requires the upstream CLI.");
+  process.exit(0);
+}
 
 function callServer(jsonArg) {
   return new Promise((resolve, reject) => {
