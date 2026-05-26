@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: node test/unit-encode.mjs
+
+      - name: Integration — batchUpdate encoding
+        run: node test/integration-batchupdate.mjs
+
+      - name: Integration — regression argv shapes
+        run: node test/integration-regression.mjs
+
+      - name: Smoke — stdio + skills layer
+        run: node test/smoke-skills.mjs
+
+      - name: Smoke — HTTP transport
+        env:
+          GWS_MCP_AUTH_TOKEN: ci-test-token
+          GWS_MCP_HTTP_PORT: "8771"
+        run: |
+          node dist/index.js http &
+          SERVER_PID=$!
+          # wait for /healthz to come up
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8771/healthz >/dev/null; then
+              break
+            fi
+            sleep 0.3
+          done
+          node test/smoke-http.mjs
+          kill $SERVER_PID

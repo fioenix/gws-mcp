@@ -1,6 +1,6 @@
 {
   "name": "gws-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server wrapping the local `gws` (Google Workspace) CLI, so sandboxed agents (Claude Cowork, etc.) can use Google Workspace through your host-side OAuth credentials.",
   "type": "module",
   "bin": {
@@ -10,7 +10,9 @@
   "files": [
     "dist",
     "README.md",
+    "README.vi.md",
     "LICENSE",
+    "CHANGELOG.md",
     ".env.example"
   ],
   "scripts": {
@@ -20,7 +22,12 @@
     "start": "node dist/index.js",
     "start:http": "node dist/index.js http",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "test:unit": "node test/unit-encode.mjs",
+    "test:integration": "node test/integration-batchupdate.mjs && node test/integration-regression.mjs",
+    "test:smoke": "node test/smoke-skills.mjs",
+    "test": "npm run test:unit && npm run test:integration && npm run test:smoke",
+    "clean": "rm -rf dist",
+    "prepack": "npm run build"
   },
   "keywords": [
     "mcp",
@@ -28,8 +35,24 @@
     "google-workspace",
     "gws",
     "claude",
-    "cowork"
+    "claude-desktop",
+    "claude-cowork",
+    "anthropic",
+    "google-drive",
+    "google-sheets",
+    "gmail",
+    "google-calendar"
   ],
+  "author": "fioenix",
+  "license": "MIT",
+  "homepage": "https://github.com/fioenix/gws-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fioenix/gws-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fioenix/gws-mcp/issues"
+  },
   "engines": {
     "node": ">=20"
   },

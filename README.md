@@ -1,39 +1,71 @@
 # gws-mcp
 
-MCP server wrap [`gws`](https://github.com/googleworkspace/cli) (Google Workspace CLI) trên host, cho **Claude Desktop / Claude Code / Claude Cowork** dùng Google Workspace mà không phải copy OAuth token hay chạy `gws auth login` lại.
+[![CI](https://github.com/fioenix/gws-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fioenix/gws-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](./package.json)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blue)](https://modelcontextprotocol.io)
 
-> **Lý do tồn tại:** `gws` lưu OAuth token trong keyring của user. Bản thân Claude Cowork là Claude Desktop chạy local nên có thể spawn `gws` thẳng — nhưng làm thế model phải tự nhớ `gws drive files list --params '...'` qua Bash, dễ sai cú pháp và không có schema introspection. MCP server này cho model một interface có structured schema (`gws_schema`, `gws_call`), audit log đầy đủ, và policy whitelist/denylist — sạch hơn nhiều so với để LLM gõ shell.
+> 🌐 **Languages:** English (this file) · [Tiếng Việt](./README.vi.md)
 
----
+A Model Context Protocol (MCP) server that wraps the locally-installed [`gws`](https://github.com/googleworkspace/cli) (Google Workspace CLI). It lets **Claude Desktop / Claude Code / Claude Cowork** — or any MCP-capable agent — use Google Workspace through the OAuth credentials stored in your host keyring, without exposing those credentials to the agent itself.
 
-## 1. Yêu cầu
+## Why this exists
 
-- `gws` CLI đã cài và đã `gws auth login` thành công.
+`gws` keeps OAuth tokens in the user's keyring. Local agents like Claude Desktop *can* spawn `gws` directly via Bash, but then the model has to remember exact CLI syntax (`gws drive files list --params '{"pageSize":10}'`), has no schema introspection, and there is no audit trail. Sandboxed agents (Vercel Sandbox, Docker workers, remote dev containers) cannot reach the host keyring at all.
+
+`gws-mcp` puts a clean, structured MCP interface in front of the CLI:
+
+- **Schema-aware tools** (`gws_schema`, `gws_call`) so the model can look up real parameter shapes before invoking an API.
+- **Skill guides** auto-mounted from `~/.agents/skills/gws-*/SKILL.md` as MCP resources and prompts — sandboxed agents see the same authoritative how-to docs the host has.
+- **Safety rails**: service allowlist, method denylist, NDJSON audit log, per-call timeout, output caps, identifier sanitisation.
+- **Two transports**: stdio (default, for local clients) and Streamable HTTP with bearer-token auth (for true remote sandboxes).
+
+## Table of contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start — Claude Desktop / Cowork](#quick-start--claude-desktop--cowork)
+- [Quick start — Claude Code CLI](#quick-start--claude-code-cli)
+- [Tools / Resources / Prompts](#tools--resources--prompts)
+- [Skills layer](#skills-layer)
+- [Environment variables](#environment-variables)
+- [Security](#security)
+- [Remote sandboxes (HTTP mode)](#remote-sandboxes-http-mode)
+- [Smoke tests](#smoke-tests)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Requirements
+
+- [`gws` CLI](https://github.com/googleworkspace/cli) installed and logged in.
   ```bash
-  gws --version           # >= 0.22.x
-  gws drive files list --params '{"pageSize": 1}'   # phải trả JSON, không lỗi auth
+  gws --version                                       # >= 0.22.x
+  gws drive files list --params '{"pageSize":1}'      # must return JSON, no auth error
   ```
-- Node.js >= 20.
+- Node.js **>= 20**.
+- macOS or Linux. Windows is untested.
 
-## 2. Cài đặt
+## Installation
 
 ```bash
-git clone <repo> gws-mcp
+git clone https://github.com/fioenix/gws-mcp.git
 cd gws-mcp
 npm install
 npm run build
-npm link        # exposes `gws-mcp` globally
+npm link        # exposes `gws-mcp` on your PATH
 ```
 
 Verify:
+
 ```bash
-which gws-mcp   # -> /opt/homebrew/bin/gws-mcp (hoặc tương đương)
+which gws-mcp   # -> /opt/homebrew/bin/gws-mcp or similar
 gws-mcp --help
 ```
 
-## 3. Đăng ký với Claude Desktop / Cowork / Code (stdio — recommended)
+## Quick start — Claude Desktop / Cowork
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop / Cowork trên macOS):
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS (or the equivalent on your platform):
 
 ```jsonc
 {
@@ -51,105 +83,108 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude D
 }
 ```
 
-Nếu không `npm link`, dùng absolute path:
+If you skipped `npm link`, use an absolute path instead:
 
 ```jsonc
 {
   "mcpServers": {
     "gws": {
       "command": "node",
-      "args": ["/Users/<you>/Projects/gws-mcp/dist/index.js", "stdio"]
+      "args": ["/absolute/path/to/gws-mcp/dist/index.js", "stdio"]
     }
   }
 }
 ```
 
-Restart Claude Desktop → trong chat thấy `gws` server kèm 4 tool (`gws_list_services`, `gws_help`, `gws_schema`, `gws_call`).
+Restart Claude Desktop. The `gws` server should appear with six tools, fourteen resources, and twelve prompts (when the skills layer finds your local skill directory).
 
-### Cho Claude Code CLI
+## Quick start — Claude Code CLI
 
 ```bash
 claude mcp add gws -- gws-mcp stdio
 ```
 
-## 4. Tool / Resource / Prompt MCP expose
+## Tools / Resources / Prompts
 
 ### Tools
 
-| Tool | Mục đích |
+| Tool | Purpose |
 |---|---|
-| `gws_list_services` | Liệt kê service (drive, sheets, gmail, …) được host cho phép. |
-| `gws_help` | Run `gws <args…> --help` để khám phá resource và method. |
-| `gws_schema` | Trả JSON schema cho `service.resource.method` — gọi trước khi `gws_call`. |
-| `gws_call` | Dispatch tới `gws` với `service`, `resource`, `method`, `params`, `json`, …. |
-| `gws_list_skills` | Liệt kê skill guide đã load từ `~/.agents/skills/gws-*`. |
-| `gws_get_skill` | Đọc nội dung đầy đủ của một skill guide (markdown). |
+| `gws_list_services` | List the Google Workspace services this server is allowed to call. |
+| `gws_help` | Run `gws <args…> --help` to discover resources and methods. |
+| `gws_schema` | Return the JSON schema for `service.resource.method` — call this **before** `gws_call`. |
+| `gws_call` | Generic dispatcher: `service`, `resource`, `method`, `params`, `json`, optional `dryRun`, `pageAll`, etc. |
+| `gws_list_skills` | List skill guides loaded from `~/.agents/skills/gws-*`. |
+| `gws_get_skill` | Return the full markdown of a skill guide. |
 
-Flow chuẩn cho LLM:
+Recommended discovery flow for an LLM:
 
 ```
 gws_list_services
-  → gws_help args:["drive"]              # khám phá resource
-  → gws_schema target:"drive.files.list" # đọc param shape
+  → gws_help args:["drive"]                # discover resources
+  → gws_schema target:"drive.files.list"   # read parameter shape
   → gws_call service:drive resource:files method:list params:{"pageSize":10}
 ```
 
-**Debugging body shape an toàn**: thêm `dryRun:true` vào `gws_call` — server sẽ in HTTP body + URL sẽ-được-gửi mà không gọi Google. Hữu ích cho method có complex `--json` body (`docs.documents.batchUpdate`, `sheets.spreadsheets.batchUpdate`, `calendar.events.insert`, …).
+**Safe debugging.** Add `dryRun:true` to `gws_call` to print the HTTP method, URL, and request body the server *would* send to Google, without actually sending it. Essential when authoring complex bodies for `docs.documents.batchUpdate`, `sheets.spreadsheets.batchUpdate`, `calendar.events.insert`, etc.
 
-**Lưu ý về `json` arg**: gửi object/array JS thẳng (preferred), KHÔNG `JSON.stringify` trước khi gọi tool — server tự stringify một lần. Wrapper có defensive logic: nếu LLM lỡ gửi string đã JSON-encode, server detect và pass-through verbatim (không double-encode).
+**JSON encoding note.** Pass `json` as an actual JSON value (object/array). Do **not** pre-stringify it — the server runs `JSON.stringify` exactly once. As a fallback the wrapper detects pre-stringified JSON strings and passes them through verbatim, so it stays safe if an LLM accidentally double-encodes.
 
 ### Resources
 
-| URI | Nội dung |
+| URI | Content |
 |---|---|
-| `gws://services` | JSON list service đang được phép. |
-| `gws-skill://_index` | JSON index toàn bộ skill (name, description, version, URI). |
-| `gws-skill://<name>` | Raw `SKILL.md` của từng skill, ví dụ `gws-skill://gws-drive`. |
+| `gws://services` | JSON list of currently allowed services. |
+| `gws-skill://_index` | JSON index of all loaded skills (name, description, version, URI). |
+| `gws-skill://<name>` | Raw `SKILL.md` for the named skill, e.g. `gws-skill://gws-drive`. |
 
 ### Prompts
 
-Mỗi skill được expose thành một MCP prompt cùng tên (`gws-drive`, `gws-sheets`, `gws-tasks`, …). Claude Desktop hiện list này trong UI "Attach from MCP" / prompt picker — user click một phát là skill được inject vào conversation như authoritative reference.
+Each loaded skill is exposed as an MCP prompt with the same name (`gws-drive`, `gws-sheets`, `gws-tasks`, …). Claude Desktop surfaces these in its prompt picker, so a user can attach a skill guide to the conversation with one click.
 
-### Skills layer (giải bài toán "Cowork không thấy `~/.agents/skills`")
+## Skills layer
 
-`gws` CLI đi kèm 12 skill guide trong `~/.agents/skills/gws-*/SKILL.md` (gws-drive, gws-sheets, gws-gmail-triage, gws-calendar-insert, …). Claude Desktop / Cowork không tự đọc được path này, nhưng MCP server *chạy trên host* thì đọc được — và nó re-expose qua **resources** + **prompts** + **tools** cho client.
+The `gws` CLI ships with field-tested markdown guides under `~/.agents/skills/gws-*/SKILL.md` — `gws-drive`, `gws-sheets`, `gws-gmail-triage`, `gws-calendar-insert`, and so on. Sandboxed agents cannot read those paths, but the MCP server runs on the host and can. It re-exposes each guide as a resource, a prompt, and via the `gws_get_skill` tool, so the model has the same authoritative reference your host has.
 
-Nghĩa là khi user prompt "đọc danh sách file Drive", model trong Cowork có thể:
-1. Gọi `gws_list_skills` để biết có guide nào.
-2. Gọi `gws_get_skill name:"gws-drive"` → đọc guide chi tiết (~13KB markdown, có ví dụ thật).
-3. Áp guide đó vào `gws_call` thay vì đoán params.
+Override behaviour:
 
-Override skills dir (mặc định `~/.agents/skills`):
-- `GWS_MCP_SKILLS_DIR=/path/to/skills`
-- `GWS_MCP_SKILLS_PREFIX=gws-` (đổi nếu muốn mount tên khác)
-- `GWS_MCP_SKILLS_DISABLED=1` (tắt hẳn layer này)
-
-## 5. Biến môi trường
-
-Xem `.env.example` cho danh sách đầy đủ. Quan trọng:
-
-| Env | Mặc định | Ý nghĩa |
+| Env | Default | Effect |
 |---|---|---|
-| `GWS_MCP_GWS_BIN` | `gws` | Path tới binary nếu không có trong PATH. |
-| `GWS_MCP_CALL_TIMEOUT_MS` | `60000` | Hard timeout cho mỗi `gws` call. |
-| `GWS_MCP_MAX_OUTPUT_BYTES` | `1048576` | Giới hạn stdout, vượt thì truncate. |
-| `GWS_MCP_ALLOWED_SERVICES` | empty=all | Whitelist, ví dụ `drive,sheets,docs,calendar`. |
-| `GWS_MCP_DENIED_METHODS` | empty | Denylist, ví dụ `gmail.users.messages.send,drive.files.delete`. |
-| `GWS_MCP_AUDIT_LOG` | empty=stderr | File NDJSON ghi mọi tool call. |
-| `GWS_MCP_SKILLS_DIR` | `~/.agents/skills` | Thư mục chứa skill guides để mount qua MCP. |
-| `GWS_MCP_SKILLS_PREFIX` | `gws-` | Prefix subdir để filter (`gws-*`). |
-| `GWS_MCP_SKILLS_DISABLED` | unset | `1` để tắt skills layer. |
+| `GWS_MCP_SKILLS_DIR` | `~/.agents/skills` | Directory scanned for skill guides. |
+| `GWS_MCP_SKILLS_PREFIX` | `gws-` | Subdir prefix to mount. |
+| `GWS_MCP_SKILLS_DISABLED` | unset | Set to `1` to turn the skills layer off entirely. |
 
-## 6. Bảo mật
+## Environment variables
 
-1. **Least-privilege**: `GWS_MCP_ALLOWED_SERVICES` chỉ mở service cần dùng. Ví dụ chỉ Drive + Sheets cho phiên Cowork: `GWS_MCP_ALLOWED_SERVICES=drive,sheets`.
-2. **Denylist destructive ops**: `GWS_MCP_DENIED_METHODS=drive.files.delete,gmail.users.messages.send,calendar.events.delete`.
-3. **Audit log**: `GWS_MCP_AUDIT_LOG=~/.cache/gws-mcp/audit.log` — NDJSON trail cho audit / compliance / forensics.
-4. **Upload paths là host paths**: `upload`/`output` trỏ tới file trên máy host. LLM trong Cowork nếu tạo file tạm thì file đó nằm trên cùng máy host (vì Cowork = Desktop local) — vẫn ổn.
+See [`.env.example`](./.env.example) for the full list. The essentials:
 
-## 7. (Optional) HTTP mode — cho true remote sandbox
+| Env | Default | Meaning |
+|---|---|---|
+| `GWS_MCP_GWS_BIN` | `gws` | Absolute path to the `gws` binary if not on `PATH`. |
+| `GWS_MCP_CALL_TIMEOUT_MS` | `60000` | Hard timeout per `gws` invocation. |
+| `GWS_MCP_MAX_OUTPUT_BYTES` | `1048576` | Cap on stdout returned to the agent; anything beyond is truncated. |
+| `GWS_MCP_ALLOWED_SERVICES` | empty = all | Comma-separated allowlist, e.g. `drive,sheets,docs,calendar`. |
+| `GWS_MCP_DENIED_METHODS` | empty | Comma-separated denylist, e.g. `gmail.users.messages.send,drive.files.delete`. |
+| `GWS_MCP_AUDIT_LOG` | empty = stderr | NDJSON audit file. Records every tool call. |
 
-Chỉ dùng khi client MCP **không** thể spawn child process tới host (Vercel Sandbox, Docker worker, remote container, agent chạy trên server khác).
+HTTP-mode specifics: `GWS_MCP_HTTP_HOST`, `GWS_MCP_HTTP_PORT` (default `8765`), `GWS_MCP_HTTP_PATH` (default `/mcp`), `GWS_MCP_AUTH_TOKEN`, `GWS_MCP_HTTP_INSECURE`, `GWS_MCP_HTTP_CORS_ORIGINS`.
+
+## Security
+
+This server brokers full Google Workspace access for the account that ran `gws auth login` on your host. Treat it accordingly.
+
+1. **Least privilege.** Use `GWS_MCP_ALLOWED_SERVICES` to expose only what an agent actually needs. For example, an analysis session might only need `drive,sheets`.
+2. **Deny destructive methods.** A reasonable default: `GWS_MCP_DENIED_METHODS=drive.files.delete,gmail.users.messages.send,calendar.events.delete`.
+3. **Keep an audit log.** Set `GWS_MCP_AUDIT_LOG=~/.cache/gws-mcp/audit.log` and you get an NDJSON record of every tool call — invaluable for forensics or compliance.
+4. **Never expose the loopback HTTP endpoint with `GWS_MCP_HTTP_INSECURE=1` on a public tunnel.** Always require a bearer token in production.
+5. **Treat the bearer token like a Google OAuth token.** Rotate it whenever you change sessions; revoke by restarting the server with a new token.
+6. **Upload/output paths are host paths.** Sandboxed agents writing to a path before calling `upload:` won't find that path on the host filesystem; have the agent push bytes through the MCP body instead, or arrange a shared volume.
+
+See [SECURITY.md](./SECURITY.md) for vulnerability disclosure.
+
+## Remote sandboxes (HTTP mode)
+
+Use the Streamable HTTP transport only when your MCP client cannot spawn a child process on the host — e.g. Vercel Sandbox, Docker workers, remote dev containers, or a hosted agent on a different machine.
 
 ```bash
 export GWS_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
@@ -157,13 +192,13 @@ gws-mcp http
 # -> [gws-mcp] HTTP transport ready at http://127.0.0.1:8765/mcp
 ```
 
-Expose qua tunnel:
+Expose the loopback endpoint through a tunnel:
 
-| Cách | Lệnh |
+| Tunnel | Command |
 |---|---|
 | **Cloudflare Tunnel** | `cloudflared tunnel --url http://127.0.0.1:8765` |
 | **ngrok** | `ngrok http 8765` |
-| **Tailscale** | `GWS_MCP_HTTP_HOST=0.0.0.0 gws-mcp http` |
+| **Tailscale** | `GWS_MCP_HTTP_HOST=0.0.0.0 gws-mcp http` and use your tailnet IP |
 
 Client config:
 
@@ -178,31 +213,46 @@ Client config:
 }
 ```
 
-> Token này = quyền Google Workspace của tài khoản `gws auth login`. Rotate thường xuyên. Không bao giờ set `GWS_MCP_HTTP_INSECURE=1` cho endpoint public.
-
-Env riêng cho HTTP mode: `GWS_MCP_HTTP_HOST`, `GWS_MCP_HTTP_PORT` (default 8765), `GWS_MCP_HTTP_PATH` (default `/mcp`), `GWS_MCP_HTTP_CORS_ORIGINS`. Xem `.env.example`.
-
-## 8. Smoke test
+## Smoke tests
 
 ```bash
 npm run build
+
+# Stdio handshake + every layer (tools, resources, prompts, skills)
+node test/smoke-skills.mjs
+
+# HTTP transport, auth, session, tool call
 GWS_MCP_AUTH_TOKEN=test gws-mcp http &
 node test/smoke-http.mjs
 kill %1
+
+# Unit + integration tests
+node test/unit-encode.mjs
+node test/integration-batchupdate.mjs
+node test/integration-regression.mjs
 ```
 
-Kỳ vọng: health 200, no-auth 401, auth init 200 + session id, `gws_list_services` trả ra 18 service.
+## Troubleshooting
 
-## 9. Troubleshooting
-
-| Triệu chứng | Khả năng cao |
+| Symptom | Likely cause |
 |---|---|
-| Tool call trả `exit code 2` | Auth hết hạn trên host. Chạy `gws auth login` lại. |
-| `exit code 3` | Param JSON sai shape. Gọi `gws_schema` trước, đối chiếu lại. |
-| `exit code 4` | gws chưa fetch được discovery API — kiểm tra mạng host. |
-| Claude Desktop không thấy server | Sai path `command`, hoặc chưa restart Desktop. Xem `~/Library/Logs/Claude/mcp*.log`. |
-| Stdout truncated | Tăng `GWS_MCP_MAX_OUTPUT_BYTES` hoặc dùng `pageAll:true` với `pageLimit` nhỏ. |
+| Tool returns `exit code 2` | Host OAuth token expired. Run `gws auth login` again. |
+| `exit code 3` | Invalid `params` or `json` shape. Call `gws_schema` first and compare. |
+| `exit code 4` | `gws` could not fetch the discovery doc — check host network access. |
+| Claude Desktop does not show the server | Wrong `command` path, or Desktop was not restarted. Check `~/Library/Logs/Claude/mcp*.log`. |
+| Stdout is truncated | Raise `GWS_MCP_MAX_OUTPUT_BYTES`, or paginate with `pageAll:true` + a small `pageLimit`. |
+| `Request body failed schema validation: $: Expected object` | Caller pre-stringified the body twice. Pass `json` as an actual object. Use `dryRun:true` to inspect what the server is about to send. |
 
-## 10. License
+## Contributing
 
-MIT — xem [LICENSE](./LICENSE). Không phải sản phẩm chính thức của Google.
+See [CONTRIBUTING.md](./CONTRIBUTING.md). A few highlights:
+
+- Conventional Commits (`feat:`, `fix:`, `chore:`…), atomic changes.
+- `npm run typecheck`, `npm run build`, and all `test/*.mjs` scripts must pass before opening a PR.
+- Keep changes surgical. Don't refactor adjacent code in the same commit.
+
+Code of Conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+
+## License
+
+[MIT](./LICENSE). This project is **not** an officially supported Google product.

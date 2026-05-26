@@ -1,0 +1,81 @@
+name: Bug report
+description: Something isn't working the way the docs say it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please redact document IDs, file IDs, and email addresses before pasting output.
+
+  - type: input
+    id: version
+    attributes:
+      label: gws-mcp version
+      placeholder: "0.2.0 (from package.json)"
+    validations:
+      required: true
+
+  - type: input
+    id: gws-version
+    attributes:
+      label: gws CLI version
+      placeholder: "0.22.5 (gws --version)"
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: "20.18.0 (node --version)"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 14.5 / Ubuntu 22.04 / …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio
+        - http
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Exact tool call (or `gws_call` arguments) that triggers the bug.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include stderr / exit code / response body if relevant.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Audit log lines, related env vars, screenshots — optional.

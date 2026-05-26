@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/fioenix/gws-mcp/security/advisories/new
+    about: Report a security issue privately — do NOT open a public issue.
+  - name: Question or usage help
+    url: https://github.com/fioenix/gws-mcp/discussions
+    about: Use Discussions for "how do I…" questions.
