@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Published on npm as [`gws-mcp`](https://www.npmjs.com/package/gws-mcp) — installable via `npm install -g gws-mcp` or `npx gws-mcp`.
+
 ## [0.2.0] - 2026-05-26
 
 ### Added

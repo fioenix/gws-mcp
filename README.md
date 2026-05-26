@@ -1,5 +1,6 @@
 # gws-mcp
 
+[![npm version](https://img.shields.io/npm/v/gws-mcp?logo=npm&color=cb3837)](https://www.npmjs.com/package/gws-mcp)
 [![CI](https://github.com/fioenix/gws-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fioenix/gws-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](./package.json)
@@ -47,6 +48,20 @@ A Model Context Protocol (MCP) server that wraps the locally-installed [`gws`](h
 - macOS or Linux. Windows is untested.
 
 ## Installation
+
+### From npm (recommended)
+
+```bash
+npm install -g gws-mcp
+```
+
+Or run on demand without installing:
+
+```bash
+npx gws-mcp --help
+```
+
+### From source
 
 ```bash
 git clone https://github.com/fioenix/gws-mcp.git

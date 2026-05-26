@@ -1,5 +1,6 @@
 # gws-mcp
 
+[![npm version](https://img.shields.io/npm/v/gws-mcp?logo=npm&color=cb3837)](https://www.npmjs.com/package/gws-mcp)
 [![CI](https://github.com/fioenix/gws-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fioenix/gws-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](./package.json)
@@ -24,8 +25,22 @@ MCP server wrap [`gws`](https://github.com/googleworkspace/cli) (Google Workspac
 
 ## 2. Cài đặt
 
+### Từ npm (khuyến nghị)
+
 ```bash
-git clone <repo> gws-mcp
+npm install -g gws-mcp
+```
+
+Hoặc chạy trực tiếp không cần cài:
+
+```bash
+npx gws-mcp --help
+```
+
+### Từ source
+
+```bash
+git clone https://github.com/fioenix/gws-mcp.git
 cd gws-mcp
 npm install
 npm run build
