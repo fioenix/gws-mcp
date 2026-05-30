@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 33% 99%;
+    --foreground: 240 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 30% 12%;
+
+    /* Brand indigo #2a2b86 */
+    --primary: 239 52% 35%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 30% 96%;
+    --secondary-foreground: 239 52% 35%;
+
+    --muted: 240 20% 96%;
+    --muted-foreground: 240 10% 46%;
+
+    /* Gold accent #fcaf16 */
+    --accent: 41 97% 54%;
+    --accent-foreground: 240 40% 14%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 20% 90%;
+    --input: 240 20% 90%;
+    --ring: 239 52% 45%;
+
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 240 30% 8%;
+    --foreground: 240 20% 96%;
+
+    --card: 240 28% 11%;
+    --card-foreground: 240 20% 96%;
+
+    --popover: 240 28% 11%;
+    --popover-foreground: 240 20% 96%;
+
+    --primary: 239 60% 70%;
+    --primary-foreground: 240 40% 12%;
+
+    --secondary: 240 20% 18%;
+    --secondary-foreground: 240 20% 96%;
+
+    --muted: 240 18% 18%;
+    --muted-foreground: 240 12% 65%;
+
+    --accent: 41 97% 54%;
+    --accent-foreground: 240 40% 14%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 18% 22%;
+    --input: 240 18% 22%;
+    --ring: 239 60% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+  .glass {
+    backdrop-filter: blur(12px);
+    background-color: hsl(var(--card) / 0.72);
+  }
+  .brand-gradient {
+    background-image: linear-gradient(135deg, #2a2b86 0%, #3f40a6 55%, #5b5dbf 100%);
+  }
+}
