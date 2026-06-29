@@ -51,7 +51,7 @@ gws calendar events insert --params '{"calendarId":"primary","sendUpdates":"all"
   "description": "Q2 sprint review",
   "start": { "dateTime": "2026-06-30T14:00:00+07:00", "timeZone": "Asia/Ho_Chi_Minh" },
   "end":   { "dateTime": "2026-06-30T15:00:00+07:00", "timeZone": "Asia/Ho_Chi_Minh" },
-  "attendees": [ { "email": "teammate@yody.vn" } ],
+  "attendees": [ { "email": "teammate@example.com" } ],
   "reminders": { "useDefault": true }
 }'
 ```
@@ -89,7 +89,7 @@ gws calendar events delete --params '{"calendarId":"primary","eventId":"EVENT_ID
 ```bash
 gws calendar freebusy query --json '{
   "timeMin":"2026-06-30T00:00:00+07:00","timeMax":"2026-07-01T00:00:00+07:00",
-  "items":[{"id":"primary"},{"id":"teammate@yody.vn"}]
+  "items":[{"id":"primary"},{"id":"teammate@example.com"}]
 }'
 ```
 

@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-29
+
 ### Added
 - Six bundled, task-focused skill guides under `skills/` — `gws-sheets`, `gws-slides`, `gws-drive`, `gws-gmail`, `gws-calendar`, `gws-docs` — encoding real CLI shapes, `fields` masks, and shell-composition recipes (slide thumbnail export, `batchUpdate` from file, non-ASCII A1 ranges, RFC 822 + base64url Gmail send). Prioritised from telemetry of actual `gws` usage (slides + sheets dominate).
-- Published on npm as [`gws-mcp`](https://www.npmjs.com/package/gws-mcp) — installable via `npm install -g gws-mcp` or `npx gws-mcp`.
 
 ### Changed
 - The skills layer now reads from the package's **bundled** `skills/` directory by default instead of `~/.agents/skills`. The guides are served lazily via `gws_get_skill` and are never copied into user-scoped skill dirs (which other agents on the machine would auto-load), keeping them private to this server and out of every session's context. Override with `GWS_MCP_SKILLS_DIR`.

@@ -79,7 +79,7 @@ the file to a host-shared location first; sandbox-only paths will not resolve.
 
 ```bash
 gws drive permissions create --params '{"fileId":"FILE_ID","sendNotificationEmail":false}' \
-  --json '{"role":"reader","type":"user","emailAddress":"teammate@yody.vn"}'
+  --json '{"role":"reader","type":"user","emailAddress":"teammate@example.com"}'
 ```
 
 `role`: `reader` | `commenter` | `writer` | `owner`. `type`: `user` | `group` |

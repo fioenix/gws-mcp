@@ -29,7 +29,7 @@ gws schema gmail.users.messages.list
 ```bash
 gws gmail messages list --params '{
   "userId": "me",
-  "q": "from:boss@yody.vn is:unread newer_than:7d",
+  "q": "from:boss@example.com is:unread newer_than:7d",
   "maxResults": 20
 }'
 ```
@@ -54,7 +54,7 @@ The API takes one field, `raw`: a full RFC 822 message, base64**url**-encoded. B
 in the shell so headers and UTF-8 bodies are correct:
 
 ```bash
-RAW=$(printf 'To: teammate@yody.vn\r\nSubject: =?UTF-8?B?%s?=\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n%s' \
+RAW=$(printf 'To: teammate@example.com\r\nSubject: =?UTF-8?B?%s?=\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n%s' \
   "$(printf 'Báo cáo Q2' | base64)" "Chào team, xem báo cáo đính kèm nhé." \
   | base64 | tr '+/' '-_' | tr -d '=')
 
