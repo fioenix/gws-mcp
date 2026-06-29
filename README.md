@@ -17,7 +17,7 @@ A Model Context Protocol (MCP) server that wraps the locally-installed [`gws`](h
 `gws-mcp` puts a clean, structured MCP interface in front of the CLI:
 
 - **Schema-aware tools** (`gws_schema`, `gws_call`) so the model can look up real parameter shapes before invoking an API.
-- **Skill guides** auto-mounted from `~/.agents/skills/gws-*/SKILL.md` as MCP resources and prompts — sandboxed agents see the same authoritative how-to docs the host has.
+- **Skill guides** bundled in the package (`skills/gws-*/SKILL.md`) and served lazily via `gws_get_skill` (plus MCP resources and prompts) — task-focused how-tos that never touch user-scoped skill dirs.
 - **Safety rails**: service allowlist, method denylist, NDJSON audit log, per-call timeout, output caps, identifier sanitisation.
 - **Two transports**: stdio (default, for local clients) and Streamable HTTP with bearer-token auth (for true remote sandboxes).
 
@@ -111,7 +111,7 @@ If you skipped `npm link`, use an absolute path instead:
 }
 ```
 
-Restart Claude Desktop. The `gws` server should appear with six tools, fourteen resources, and twelve prompts (when the skills layer finds your local skill directory).
+Restart Claude Desktop. The `gws` server should appear with six tools, eight resources, and six prompts (the four core tools plus the skills layer, which loads the six bundled `gws-*` guides by default).
 
 ## Quick start — Claude Code CLI
 
@@ -129,7 +129,7 @@ claude mcp add gws -- gws-mcp stdio
 | `gws_help` | Run `gws <args…> --help` to discover resources and methods. |
 | `gws_schema` | Return the JSON schema for `service.resource.method` — call this **before** `gws_call`. |
 | `gws_call` | Generic dispatcher: `service`, `resource`, `method`, `params`, `json`, optional `dryRun`, `pageAll`, etc. |
-| `gws_list_skills` | List skill guides loaded from `~/.agents/skills/gws-*`. |
+| `gws_list_skills` | List skill guides bundled with this server (`skills/gws-*`). |
 | `gws_get_skill` | Return the full markdown of a skill guide. |
 
 Recommended discovery flow for an LLM:
@@ -159,13 +159,28 @@ Each loaded skill is exposed as an MCP prompt with the same name (`gws-drive`, `
 
 ## Skills layer
 
-The `gws` CLI ships with field-tested markdown guides under `~/.agents/skills/gws-*/SKILL.md` — `gws-drive`, `gws-sheets`, `gws-gmail-triage`, `gws-calendar-insert`, and so on. Sandboxed agents cannot read those paths, but the MCP server runs on the host and can. It re-exposes each guide as a resource, a prompt, and via the `gws_get_skill` tool, so the model has the same authoritative reference your host has.
+This package bundles six task-focused skill guides under [`skills/`](skills/) —
+`gws-sheets`, `gws-slides`, `gws-drive`, `gws-gmail`, `gws-calendar`, `gws-docs`. Each
+one encodes the exact CLI shapes, `fields` masks, and shell-composition recipes for the
+workflows that come up most (slide thumbnail export, `batchUpdate` from a file, A1 ranges
+with non-ASCII tab names, RFC 822 + base64url for Gmail send, …) so the agent stops
+re-discovering them with repeated `gws --help`.
+
+The server reads these guides **in place** from its own bundled `skills/` directory — no
+install step, and nothing is ever copied into user-scoped dirs like `~/.agents/skills`
+(which other agents on the machine would auto-load). The guides stay private to this
+server and lazy: an agent starts with just the `gws_*` tools, calls `gws_list_skills` to
+see the short one-line index, and `gws_get_skill` to pull a full body **only when it needs
+one** — so a skill body never enters the model's context until it's actually used.
+
+To customise the set, edit the markdown under `skills/`, or point `GWS_MCP_SKILLS_DIR` at
+your own directory of `gws-*/SKILL.md` guides.
 
 Override behaviour:
 
 | Env | Default | Effect |
 |---|---|---|
-| `GWS_MCP_SKILLS_DIR` | `~/.agents/skills` | Directory scanned for skill guides. |
+| `GWS_MCP_SKILLS_DIR` | bundled `skills/` | Directory scanned for `gws-*` skill guides. Defaults to the guides bundled in the package; override to use your own. |
 | `GWS_MCP_SKILLS_PREFIX` | `gws-` | Subdir prefix to mount. |
 | `GWS_MCP_SKILLS_DISABLED` | unset | Set to `1` to turn the skills layer off entirely. |
 

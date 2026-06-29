@@ -104,7 +104,7 @@ claude mcp add gws -- gws-mcp stdio
 | `gws_help` | Run `gws <args…> --help` để khám phá resource và method. |
 | `gws_schema` | Trả JSON schema cho `service.resource.method` — gọi trước khi `gws_call`. |
 | `gws_call` | Dispatch tới `gws` với `service`, `resource`, `method`, `params`, `json`, …. |
-| `gws_list_skills` | Liệt kê skill guide đã load từ `~/.agents/skills/gws-*`. |
+| `gws_list_skills` | Liệt kê skill guide bundle sẵn trong server (`skills/gws-*`). |
 | `gws_get_skill` | Đọc nội dung đầy đủ của một skill guide (markdown). |
 
 Flow chuẩn cho LLM:
@@ -132,17 +132,17 @@ gws_list_services
 
 Mỗi skill được expose thành một MCP prompt cùng tên (`gws-drive`, `gws-sheets`, `gws-tasks`, …). Claude Desktop hiện list này trong UI "Attach from MCP" / prompt picker — user click một phát là skill được inject vào conversation như authoritative reference.
 
-### Skills layer (giải bài toán "Cowork không thấy `~/.agents/skills`")
+### Skills layer
 
-`gws` CLI đi kèm 12 skill guide trong `~/.agents/skills/gws-*/SKILL.md` (gws-drive, gws-sheets, gws-gmail-triage, gws-calendar-insert, …). Claude Desktop / Cowork không tự đọc được path này, nhưng MCP server *chạy trên host* thì đọc được — và nó re-expose qua **resources** + **prompts** + **tools** cho client.
+Package này bundle sẵn 6 skill guide bám workflow thật trong `skills/gws-*/SKILL.md` (gws-sheets, gws-slides, gws-drive, gws-gmail, gws-calendar, gws-docs). Server đọc **tại chỗ** từ bundled dir của chính nó — không có bước install, không bao giờ copy vào thư mục user-scoped như `~/.agents/skills` (nơi các agent khác trên máy sẽ tự nạp lên). Skill ở riêng trong server này và **lazy**.
 
-Nghĩa là khi user prompt "đọc danh sách file Drive", model trong Cowork có thể:
-1. Gọi `gws_list_skills` để biết có guide nào.
-2. Gọi `gws_get_skill name:"gws-drive"` → đọc guide chi tiết (~13KB markdown, có ví dụ thật).
+Nghĩa là khi user prompt "đọc danh sách file Drive", model có thể:
+1. Gọi `gws_list_skills` để biết có guide nào (chỉ index 1 dòng/skill).
+2. Gọi `gws_get_skill name:"gws-drive"` → body đầy đủ **chỉ nạp vào context lúc này**.
 3. Áp guide đó vào `gws_call` thay vì đoán params.
 
-Override skills dir (mặc định `~/.agents/skills`):
-- `GWS_MCP_SKILLS_DIR=/path/to/skills`
+Tuỳ biến:
+- `GWS_MCP_SKILLS_DIR=/path/to/skills` (mặc định: bundled `skills/`)
 - `GWS_MCP_SKILLS_PREFIX=gws-` (đổi nếu muốn mount tên khác)
 - `GWS_MCP_SKILLS_DISABLED=1` (tắt hẳn layer này)
 
@@ -158,7 +158,7 @@ Xem `.env.example` cho danh sách đầy đủ. Quan trọng:
 | `GWS_MCP_ALLOWED_SERVICES` | empty=all | Whitelist, ví dụ `drive,sheets,docs,calendar`. |
 | `GWS_MCP_DENIED_METHODS` | empty | Denylist, ví dụ `gmail.users.messages.send,drive.files.delete`. |
 | `GWS_MCP_AUDIT_LOG` | empty=stderr | File NDJSON ghi mọi tool call. |
-| `GWS_MCP_SKILLS_DIR` | `~/.agents/skills` | Thư mục chứa skill guides để mount qua MCP. |
+| `GWS_MCP_SKILLS_DIR` | bundled `skills/` | Thư mục chứa skill guides `gws-*`. Mặc định dùng bộ bundle sẵn; override để dùng bộ riêng. |
 | `GWS_MCP_SKILLS_PREFIX` | `gws-` | Prefix subdir để filter (`gws-*`). |
 | `GWS_MCP_SKILLS_DISABLED` | unset | `1` để tắt skills layer. |
 

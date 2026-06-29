@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 export interface SkillMeta {
@@ -101,8 +102,19 @@ function deepGet(obj: unknown, path: string[]): unknown {
   return cur;
 }
 
+/**
+ * The skill guides bundled inside this package. From either `src/skills.ts` (dev) or
+ * `dist/skills.js` (built/published) the directory sits one level up at `<pkg>/skills`,
+ * so the same resolution works in both. We read these in place — the guides never get
+ * copied into user-scoped dirs like `~/.agents/skills` (which other agents auto-load),
+ * keeping them private to this server and lazy via `gws_get_skill`.
+ */
+function bundledSkillsDir(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
+}
+
 export function resolveSkillsDir(input: string | undefined): string {
-  if (!input) return join(homedir(), ".agents", "skills");
+  if (!input) return bundledSkillsDir();
   if (input.startsWith("~/")) return join(homedir(), input.slice(2));
   return input;
 }
