@@ -1,6 +1,6 @@
 {
   "name": "gws-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MCP server wrapping the local `gws` (Google Workspace) CLI, so sandboxed agents (Claude Cowork, etc.) can use Google Workspace through your host-side OAuth credentials.",
   "type": "module",
   "bin": {

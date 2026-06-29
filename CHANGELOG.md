@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-29
+
+### Fixed
+- MCP `serverInfo.version` is now read from `package.json` instead of a hardcoded string, so the handshake version can no longer drift from the published version (was reporting `0.2.0` in 0.3.0).
+
 ## [0.3.0] - 2026-06-29
 
 ### Added

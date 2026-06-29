@@ -1,9 +1,24 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Config } from "./config.js";
 import { GwsClient, type GwsCallInput, type GwsExecResult } from "./gws.js";
 import { AuditLogger } from "./audit.js";
 import type { Skill } from "./skills.js";
+
+// Single source of truth for the version reported in the MCP handshake: read it
+// from package.json (at the package root, one level up from src/ and dist/) so it
+// can never drift from the published version.
+const VERSION = (() => {
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    return (JSON.parse(readFileSync(pkgPath, "utf8")).version as string) || "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 const SERVICES = [
   "drive",
@@ -74,7 +89,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
     : "";
 
   const server = new McpServer(
-    { name: "gws-mcp", version: "0.2.0" },
+    { name: "gws-mcp", version: VERSION },
     {
       capabilities: {
         tools: {},
