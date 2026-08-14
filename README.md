@@ -196,6 +196,50 @@ See [`.env.example`](./.env.example) for the full list. The essentials:
 | `GWS_MCP_ALLOWED_SERVICES` | empty = all | Comma-separated allowlist, e.g. `drive,sheets,docs,calendar`. |
 | `GWS_MCP_DENIED_METHODS` | empty | Comma-separated denylist, e.g. `gmail.users.messages.send,drive.files.delete`. |
 | `GWS_MCP_AUDIT_LOG` | empty = stderr | NDJSON audit file. Records every tool call. |
+| `GWS_PROFILE` | empty | Name of a credential profile — see below. |
+| `GWS_PROFILE_ROOT` | `~/.config/gcloud/profiles` | Where profiles live. |
+
+### Running several Google accounts
+
+If you point different agents at different Google accounts, `GWS_PROFILE` saves you from
+repeating absolute paths in every host config. Lay the profiles out like this:
+
+```
+~/.config/gcloud/profiles/
+├── work/
+│   ├── gcloud/application_default_credentials.json
+│   └── gws/            # gws token cache — must be per-profile
+└── personal/
+    ├── gcloud/application_default_credentials.json
+    └── gws/
+```
+
+Then one variable picks the account:
+
+```json
+"env": { "GWS_PROFILE": "work" }
+```
+
+which expands to `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` and `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`.
+Setting either of those explicitly still wins. An unknown profile is a startup error rather than a
+silent fallback, so a typo can't quietly run an agent as the wrong account.
+
+Each profile needs its own `gws` config dir: `gws` caches tokens there, and two profiles sharing
+one directory will read each other's identity.
+
+To create the credentials, log in with your **own** OAuth client — Google blocks gcloud's shared
+client from requesting Workspace scopes:
+
+```bash
+CLOUDSDK_CONFIG=~/.config/gcloud/profiles/work/gcloud \
+gcloud auth application-default login \
+  --client-id-file=~/.config/gcloud/profiles/work/client_secret.json \
+  --scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/gmail.modify
+```
+
+Keep `client_secret.json` outside the `gws/` config dir. If `gws` finds it there it sends that
+project as the quota project, which fails with 403 unless the account holds
+`serviceusage.services.use` on it.
 
 HTTP-mode specifics: `GWS_MCP_HTTP_HOST`, `GWS_MCP_HTTP_PORT` (default `8765`), `GWS_MCP_HTTP_PATH` (default `/mcp`), `GWS_MCP_AUTH_TOKEN`, `GWS_MCP_HTTP_INSECURE`, `GWS_MCP_HTTP_CORS_ORIGINS`.
 
