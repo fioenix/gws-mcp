@@ -23,7 +23,7 @@
     "start": "node dist/index.js",
     "start:http": "node dist/index.js http",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node test/unit-encode.mjs",
+    "test:unit": "node test/unit-encode.mjs && node test/unit-profile.mjs",
     "test:integration": "node test/integration-batchupdate.mjs && node test/integration-regression.mjs",
     "test:smoke": "node test/smoke-skills.mjs",
     "test": "npm run test:unit && npm run test:integration && npm run test:smoke",

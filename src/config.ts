@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 function getEnv(name: string, fallback = ""): string {
   const v = process.env[name];
   return v === undefined || v === "" ? fallback : v;
@@ -46,7 +50,43 @@ export interface Config {
   };
 }
 
+/**
+ * `GWS_PROFILE=work` expands to the gws env vars for that profile, so a host
+ * config only names the profile instead of repeating two absolute paths.
+ *
+ *   <root>/<profile>/gcloud/application_default_credentials.json  -> credentials
+ *   <root>/<profile>/gws                                          -> config dir (token cache)
+ *
+ * Root defaults to ~/.config/gcloud/profiles, override with GWS_PROFILE_ROOT.
+ * Explicitly set GOOGLE_WORKSPACE_CLI_* vars win, so a host can still pin paths.
+ *
+ * The config dir must stay per-profile: gws caches tokens there, and sharing one
+ * between profiles makes them read each other's identity.
+ */
+export function resolveProfile(env: NodeJS.ProcessEnv = process.env): void {
+  const profile = env.GWS_PROFILE?.trim();
+  if (!profile) return;
+
+  const root = env.GWS_PROFILE_ROOT?.trim() || join(homedir(), ".config", "gcloud", "profiles");
+  const dir = join(root, profile);
+  const credentials = join(dir, "gcloud", "application_default_credentials.json");
+
+  // Fail loudly. Falling through would let gws pick up the default config dir and
+  // run as whatever identity happens to live there.
+  if (!existsSync(credentials)) {
+    throw new Error(
+      `GWS_PROFILE="${profile}": credentials not found at ${credentials}. ` +
+        `Run: gcloud auth application-default login --client-id-file=${join(dir, "client_secret.json")} --scopes=...`,
+    );
+  }
+
+  env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ||= credentials;
+  env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR ||= join(dir, "gws");
+}
+
 export function loadConfig(overrides: Partial<{ transport: Transport }> = {}): Config {
+  resolveProfile();
+
   const envTransport = getEnv("GWS_MCP_TRANSPORT", "stdio") as Transport;
   const transport: Transport = overrides.transport ?? (envTransport === "http" ? "http" : "stdio");
 
