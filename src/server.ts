@@ -80,6 +80,31 @@ export interface BuildServerOptions {
   skills?: Skill[];
 }
 
+/**
+ * Where credentials come from, described for the agent reading these instructions.
+ *
+ * When the host points gws at a gcloud ADC file, gws's own credential store is out of
+ * the picture — but an agent that only knows the default setup will reach for
+ * `gws auth login` on the first auth error and make things worse. Spell out the rules
+ * of whichever mode is actually running.
+ */
+export function authBlurb(env: NodeJS.ProcessEnv = process.env): string {
+  const credentialsFile = env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE?.trim();
+  if (!credentialsFile) {
+    return "Authentication happens on the host machine via `gws auth login` (tokens live in the host keyring); this server never sees credentials.";
+  }
+
+  const profile = env.GWS_PROFILE?.trim();
+  const source = profile ? `profile "${profile}"` : "an explicitly configured credentials file";
+
+  return [
+    `Credentials come from ${source}: gws reads ${credentialsFile} directly, a gcloud application-default credentials file. This server never sees them.`,
+    "Do NOT run `gws auth login` or `gws auth setup` here. Both belong to gws's own credential store, which this host does not use; `auth setup` additionally rewrites the OAuth client config and has been observed to corrupt it.",
+    "Do NOT copy or symlink client_secret.json into the gws config dir. gws would then send that file's project as the quota project, and every call fails with 403 unless the account holds serviceusage.services.use on it. That file belongs outside the config dir, used only as `--client-id-file` when logging in.",
+    "On `invalid_rapt` or `invalid_grant`, the credentials need a browser to refresh — you cannot do it. Ask the user to run `gcloud auth application-default login` with the same `--client-id-file` and `--scopes` they used originally. `gws auth status` is safe and useful for diagnosing.",
+  ].join("\n");
+}
+
 export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServer {
   const skills = opts.skills ?? [];
   const skillsByName = new Map(skills.map((s) => [s.name, s] as const));
@@ -98,7 +123,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       },
       instructions: [
         "This MCP server wraps the locally-installed `gws` Google Workspace CLI.",
-        "Authentication happens on the host machine via gws (OAuth tokens stored in the host keyring); this server never sees credentials.",
+        authBlurb(),
         "Recommended flow:",
         "  1. Call `gws_list_services` to see what is enabled.",
         "  2. Call `gws_help` with `args:[\"<service>\"]` or `args:[\"<service>\",\"<resource>\"]` to discover methods.",
