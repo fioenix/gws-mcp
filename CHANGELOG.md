@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `GWS_PROFILE` selects credentials by name instead of repeating two absolute paths in every host config. It expands to `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` and `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` under `GWS_PROFILE_ROOT` (default `~/.config/gcloud/profiles`). An unknown profile fails at startup rather than silently falling back to whatever identity sits in the default config dir. Explicitly set `GOOGLE_WORKSPACE_CLI_*` vars still win, so hosts calling the `gws` CLI directly can keep pinning paths.
+- `gws-auth` skill guide: how to tell which credential mode a host runs, an error-to-action table (`invalid_rapt`, `403 serviceusage.serviceUsageConsumer`, `No OAuth client configured`, `This app is blocked`, …), and the two moves that look like fixes but corrupt the setup.
+
+### Changed
+- Server instructions now report the credential mode actually in effect. When the host points `gws` at a gcloud ADC file they name the profile and rule out `gws auth login` / `gws auth setup` and copying `client_secret.json` into the config dir; hosts on the default setup keep the original `gws auth login` guidance.
+- Sample data in the bundled skills is English. Examples that existed to demonstrate non-ASCII handling — MIME encoded-word subjects, quoted A1 tab names — keep a non-ASCII string, just a locale-neutral one.
+
 ## [0.3.1] - 2026-06-29
 
 ### Fixed
