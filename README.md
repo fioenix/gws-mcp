@@ -111,7 +111,7 @@ If you skipped `npm link`, use an absolute path instead:
 }
 ```
 
-Restart Claude Desktop. The `gws` server should appear with six tools, eight resources, and six prompts (the four core tools plus the skills layer, which loads the six bundled `gws-*` guides by default).
+Restart Claude Desktop. The `gws` server should appear with six tools, nine resources, and seven prompts (the four core tools plus the skills layer, which loads the seven bundled `gws-*` guides by default).
 
 ## Quick start — Claude Code CLI
 
@@ -159,8 +159,9 @@ Each loaded skill is exposed as an MCP prompt with the same name (`gws-drive`, `
 
 ## Skills layer
 
-This package bundles six task-focused skill guides under [`skills/`](skills/) —
-`gws-sheets`, `gws-slides`, `gws-drive`, `gws-gmail`, `gws-calendar`, `gws-docs`. Each
+This package bundles seven task-focused skill guides under [`skills/`](skills/) —
+`gws-sheets`, `gws-slides`, `gws-drive`, `gws-gmail`, `gws-calendar`, `gws-docs`, and
+`gws-auth` for diagnosing credential problems without making them worse. Each
 one encodes the exact CLI shapes, `fields` masks, and shell-composition recipes for the
 workflows that come up most (slide thumbnail export, `batchUpdate` from a file, A1 ranges
 with non-ASCII tab names, RFC 822 + base64url for Gmail send, …) so the agent stops

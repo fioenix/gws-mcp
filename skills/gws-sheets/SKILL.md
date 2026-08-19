@@ -37,9 +37,9 @@ gws sheets spreadsheets values get --params '{
 }'
 ```
 
-- **Range = `<TabName>!<A1>`**. Tab names with spaces, non-ASCII (e.g. Vietnamese
-  `1. CN & CĐS`), or punctuation **must be single-quoted inside the range**:
-  `"range": "'1. CN & CĐS'!A1:F"`. In a POSIX shell wrap the whole `--params`
+- **Range = `<TabName>!<A1>`**. Tab names with spaces, non-ASCII characters, or
+  punctuation **must be single-quoted inside the range**:
+  `"range": "'1. Ümsatz & Kosten'!A1:F"`. In a POSIX shell wrap the whole `--params`
   in double quotes and escape the inner single quotes, or pass the JSON from a file.
 - Open-ended ranges are fine: `"Sheet1!A:D"` (all rows), `"Sheet1!A2:F"` (from row 2).
 - `"valueRenderOption": "UNFORMATTED_VALUE"` returns raw numbers/dates instead of

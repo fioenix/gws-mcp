@@ -61,7 +61,7 @@ gws calendar events insert --params '{"calendarId":"primary","sendUpdates":"all"
 Use `date` (not `dateTime`); `end.date` is **exclusive** (the day after the last day):
 
 ```json
-{ "summary": "Nghỉ lễ",
+{ "summary": "Public holiday",
   "start": { "date": "2026-09-02" },
   "end":   { "date": "2026-09-03" } }
 ```
