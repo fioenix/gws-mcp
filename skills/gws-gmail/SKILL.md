@@ -55,7 +55,7 @@ in the shell so headers and UTF-8 bodies are correct:
 
 ```bash
 RAW=$(printf 'To: teammate@example.com\r\nSubject: =?UTF-8?B?%s?=\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n%s' \
-  "$(printf 'Báo cáo Q2' | base64)" "Chào team, xem báo cáo đính kèm nhé." \
+  "$(printf 'Q2 Übersicht' | base64)" "Hi team, the attached report covers Q2." \
   | base64 | tr '+/' '-_' | tr -d '=')
 
 gws gmail messages send --params '{"userId":"me"}' --json "{\"raw\":\"$RAW\"}"

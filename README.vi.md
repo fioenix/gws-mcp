@@ -134,7 +134,7 @@ Mỗi skill được expose thành một MCP prompt cùng tên (`gws-drive`, `gw
 
 ### Skills layer
 
-Package này bundle sẵn 6 skill guide bám workflow thật trong `skills/gws-*/SKILL.md` (gws-sheets, gws-slides, gws-drive, gws-gmail, gws-calendar, gws-docs). Server đọc **tại chỗ** từ bundled dir của chính nó — không có bước install, không bao giờ copy vào thư mục user-scoped như `~/.agents/skills` (nơi các agent khác trên máy sẽ tự nạp lên). Skill ở riêng trong server này và **lazy**.
+Package này bundle sẵn 7 skill guide bám workflow thật trong `skills/gws-*/SKILL.md` (gws-sheets, gws-slides, gws-drive, gws-gmail, gws-calendar, gws-docs, và gws-auth để chẩn đoán lỗi credential mà không làm hỏng thêm). Server đọc **tại chỗ** từ bundled dir của chính nó — không có bước install, không bao giờ copy vào thư mục user-scoped như `~/.agents/skills` (nơi các agent khác trên máy sẽ tự nạp lên). Skill ở riêng trong server này và **lazy**.
 
 Nghĩa là khi user prompt "đọc danh sách file Drive", model có thể:
 1. Gọi `gws_list_skills` để biết có guide nào (chỉ index 1 dòng/skill).

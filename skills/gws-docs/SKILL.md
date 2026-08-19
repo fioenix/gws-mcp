@@ -43,9 +43,9 @@ All mutations are `requests` in one `batchUpdate`. Build large payloads in a fil
 ```bash
 cat > /tmp/doc_requests.json <<'JSON'
 { "requests": [
-  { "insertText": { "location": { "index": 1 }, "text": "Báo cáo Q2\n" } },
+  { "insertText": { "location": { "index": 1 }, "text": "Q2 Report\n" } },
   { "updateTextStyle": {
-      "range": { "startIndex": 1, "endIndex": 11 },
+      "range": { "startIndex": 1, "endIndex": 10 },
       "textStyle": { "bold": true, "fontSize": { "magnitude": 18, "unit": "PT" } },
       "fields": "bold,fontSize" } }
 ] }
