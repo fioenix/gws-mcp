@@ -274,6 +274,35 @@ project as the quota project, which fails with 403 unless the account holds
 
 HTTP-mode specifics: `GWS_MCP_HTTP_HOST`, `GWS_MCP_HTTP_PORT` (default `8765`), `GWS_MCP_HTTP_PATH` (default `/mcp`), `GWS_MCP_AUTH_TOKEN`, `GWS_MCP_HTTP_INSECURE`, `GWS_MCP_HTTP_CORS_ORIGINS`.
 
+### Hosts launched from a GUI
+
+A host started from the Dock or by launchd — Claude Desktop, typically — hands its child
+processes a bare `PATH` of `/usr/bin:/bin:/usr/sbin:/sbin`. Nothing installed by Homebrew, nvm,
+or `pip --user` is on it. The same host started from a terminal inherits a full PATH and works,
+so the failure depends on how the app happened to be opened.
+
+The server handles its own side: it resolves `gws` (and the `zsh` behind `gws_gcp`) against the
+usual install locations as well as `PATH`, hands children an augmented `PATH` so nested tools
+like `gcloud` resolve, and names the missing binary instead of surfacing a bare `ENOENT`.
+
+What it cannot fix is the host finding `gws-mcp` in the first place. Give the server a `PATH` in
+its own `env` block — the client uses it both to locate the command and to run its
+`#!/usr/bin/env node` shebang:
+
+```json
+"gws": {
+  "command": "gws-mcp",
+  "args": ["stdio"],
+  "env": {
+    "GWS_PROFILE": "work",
+    "PATH": "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  }
+}
+```
+
+The same block works unchanged in `claude_desktop_config.json` and in Claude Code's
+`~/.claude.json`, so one machine running both hosts keeps one configuration.
+
 ## Security
 
 This server brokers full Google Workspace access for the account that ran `gws auth login` on your host. Treat it accordingly.

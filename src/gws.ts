@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { Config } from "./config.js";
 import { applyOverlay, ProfileManager, type EnvOverlay } from "./profiles.js";
+import { augmentPath, missingBinMessage, resolveBin } from "./binpath.js";
 
 export interface GwsCallInput {
   /**
@@ -82,8 +83,17 @@ function assertSafeIdentifier(label: string, value: string): void {
 export interface AuthStatus {
   raw: string;
   parsed: Record<string, unknown> | null;
+  /** False only when gws actually reported an invalid token. See `probed`. */
   tokenValid: boolean;
   tokenError: string | null;
+  /**
+   * Whether `gws auth status` ran and returned parseable JSON.
+   *
+   * When it did not — gws missing from PATH, a timeout — we know nothing about the
+   * token. Reporting that as "invalid" would be inventing a verdict from a failed
+   * probe, and sends the user off to re-authenticate credentials that are fine.
+   */
+  probed: boolean;
 }
 
 export class GwsClient {
@@ -152,10 +162,25 @@ export class GwsClient {
    * take effect without restarting the MCP server.
    */
   async exec(args: string[], overlay?: EnvOverlay): Promise<GwsExecResult> {
-    const bin = this.cfg.gws.bin || "gws";
+    const name = this.cfg.gws.bin || "gws";
     const start = Date.now();
     const maxBytes = this.cfg.gws.maxOutputBytes;
     const env = applyOverlay(process.env, overlay ?? this.profiles.envOverlay());
+    // Children of gws (and of the gcp helper) look up their own tools too.
+    env.PATH = augmentPath(env);
+
+    const bin = resolveBin(name, env);
+    if (!bin) {
+      return {
+        ok: false,
+        exitCode: null,
+        stdout: "",
+        stderr: missingBinMessage(name, "GWS_MCP_GWS_BIN"),
+        stdoutTruncated: false,
+        command: [name, ...args],
+        durationMs: Date.now() - start,
+      };
+    }
 
     return await new Promise<GwsExecResult>((resolve) => {
       const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], env });
@@ -277,6 +302,7 @@ export class GwsClient {
     return {
       raw: result.stdout || result.stderr,
       parsed,
+      probed: parsed !== null,
       tokenValid: parsed?.token_valid === true,
       tokenError: typeof parsed?.token_error === "string" ? (parsed.token_error as string) : null,
     };
