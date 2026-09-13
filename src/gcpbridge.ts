@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { augmentPath, missingBinMessage, resolveBin } from "./binpath.js";
 
 /**
  * `gcp` is a zsh *function* defined in a file sourced from ~/.zshrc, so a
@@ -96,8 +97,17 @@ export class GcpBridge {
     }
 
     const script = buildGcpScript(this.scriptPath, [sub, ...rest]);
+    // The helper shells out to gcloud, which is not on a GUI-launched host's PATH.
+    // Without this the helper "succeeds" while reporting blanks, which reads as a
+    // clean answer and is worse than failing.
+    const env = { ...process.env, PATH: augmentPath(process.env) };
+    const shell = resolveBin("zsh", env);
+    if (!shell) {
+      return { ok: false, executed: false, stdout: "", stderr: missingBinMessage("zsh"), exitCode: null };
+    }
+
     return await new Promise<GcpResult>((resolve) => {
-      const child = spawn("zsh", ["-c", script], { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(shell, ["-c", script], { stdio: ["ignore", "pipe", "pipe"], env });
       let out = "";
       let err = "";
       let timedOut = false;

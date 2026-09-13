@@ -174,7 +174,8 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       const probes = await Promise.all(
         candidates.map(async (p) => {
           try {
-            return (await gws.authStatus(p.name)).tokenValid ? p : null;
+            const st = await gws.authStatus(p.name);
+            return st.probed && st.tokenValid ? p : null;
           } catch {
             return null; // a probe failure is not the error we are reporting
           }
@@ -428,7 +429,14 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
 
   // -------- Profile layer --------
 
-  function formatProfile(p: ProfileInfo, token?: { valid: boolean; error: string | null }): string {
+  type TokenState = { valid: boolean; error: string | null; probed: boolean };
+
+  function renderToken(t: TokenState): string {
+    if (!t.probed) return `unknown — could not run \`gws auth status\` (${t.error ?? "no output"})`;
+    return t.valid ? "valid" : `INVALID — ${t.error ?? "unknown error"}`;
+  }
+
+  function formatProfile(p: ProfileInfo, token?: TokenState): string {
     const marks = [p.active ? "ACTIVE" : null, p.credentialsExist ? null : "no-credentials"].filter(Boolean);
     const head = `${p.name}${marks.length ? `  [${marks.join(", ")}]` : ""}`;
     const lines = [
@@ -438,9 +446,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       `    credentials : ${p.credentialsFile}${p.credentialsExist ? "" : "  (MISSING)"}`,
       `    config dir  : ${p.configDir}${p.configDirExists ? "" : "  (MISSING)"}`,
     ];
-    if (token) {
-      lines.push(`    token       : ${token.valid ? "valid" : `INVALID — ${token.error ?? "unknown error"}`}`);
-    }
+    if (token) lines.push(`    token       : ${renderToken(token)}`);
     return lines.join("\n");
   }
 
@@ -474,9 +480,13 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
             if (!checkTokens || !p.credentialsExist) return formatProfile(p);
             try {
               const st = await gws.authStatus(p.name);
-              return formatProfile(p, { valid: st.tokenValid, error: st.tokenError });
+              return formatProfile(p, {
+                valid: st.tokenValid,
+                error: st.tokenError ?? (st.probed ? null : st.raw.split("\n")[0]),
+                probed: st.probed,
+              });
             } catch (e) {
-              return formatProfile(p, { valid: false, error: (e as Error).message });
+              return formatProfile(p, { valid: false, error: (e as Error).message, probed: false });
             }
           }),
         ),
@@ -520,7 +530,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
                   : "No profile selected — gws is using its own default config dir.",
                 `credentials : ${process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? "(gws default)"}`,
                 `config dir  : ${process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR ?? "(gws default)"}`,
-                `token       : ${status.tokenValid ? "valid" : `INVALID — ${status.tokenError ?? "unknown error"}`}`,
+                `token       : ${renderToken({ valid: status.tokenValid, error: status.tokenError ?? status.raw.split("\n")[0], probed: status.probed })}`,
                 "",
                 "`gws_profile_use` can still select a profile for this session.",
               ].join("\n"),
@@ -536,10 +546,16 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
           {
             type: "text",
             text:
-              formatProfile(info, { valid: status.tokenValid, error: status.tokenError }) +
-              (status.tokenValid
-                ? ""
-                : `\n\nThis profile cannot make calls until the user re-authenticates. Run \`gws_profile_list\` to see whether another profile is usable.`),
+              formatProfile(info, {
+                valid: status.tokenValid,
+                error: status.tokenError ?? (status.probed ? null : status.raw.split("\n")[0]),
+                probed: status.probed,
+              }) +
+              (!status.probed
+                ? `\n\nThe token state is unknown because \`gws auth status\` could not run — that is a host setup problem, not a credential problem. Do not send the user to re-authenticate on the strength of this.`
+                : status.tokenValid
+                  ? ""
+                  : `\n\nThis profile cannot make calls until the user re-authenticates. Run \`gws_profile_list\` to see whether another profile is usable.`),
           },
         ],
       };
@@ -580,10 +596,17 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
               type: "text",
               text:
                 `Switched ${previous ?? "(none)"} -> ${name} for this MCP session.\n\n` +
-                formatProfile({ ...info, active: true }, { valid: status.tokenValid, error: status.tokenError }) +
-                (status.tokenValid
-                  ? ""
-                  : `\n\nWarning: this profile's token is not valid, so calls will still fail. Ask the user to run \`gcp login ${name}\`.`),
+                formatProfile(
+                  { ...info, active: true },
+                  {
+                    valid: status.tokenValid,
+                    error: status.tokenError ?? (status.probed ? null : status.raw.split("\n")[0]),
+                    probed: status.probed,
+                  },
+                ) +
+                (status.probed && !status.tokenValid
+                  ? `\n\nWarning: this profile's token is not valid, so calls will still fail. Ask the user to run \`gcp login ${name}\`.`
+                  : ""),
             },
           ],
         };
