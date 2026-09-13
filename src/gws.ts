@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Config } from "./config.js";
+import { applyOverlay, ProfileManager, type EnvOverlay } from "./profiles.js";
 
 export interface GwsCallInput {
   service: string;
@@ -69,8 +70,18 @@ function assertSafeIdentifier(label: string, value: string): void {
   }
 }
 
+export interface AuthStatus {
+  raw: string;
+  parsed: Record<string, unknown> | null;
+  tokenValid: boolean;
+  tokenError: string | null;
+}
+
 export class GwsClient {
-  constructor(private readonly cfg: Config) {}
+  constructor(
+    private readonly cfg: Config,
+    readonly profiles: ProfileManager = new ProfileManager(),
+  ) {}
 
   isServiceAllowed(service: string): boolean {
     const allow = this.cfg.safety.allowedServices;
@@ -126,13 +137,19 @@ export class GwsClient {
     return args;
   }
 
-  async exec(args: string[]): Promise<GwsExecResult> {
+  /**
+   * Child env is rebuilt on every spawn from the profile selected *now*, not from
+   * whatever the host exported at startup. That is what makes `gws_profile_use`
+   * take effect without restarting the MCP server.
+   */
+  async exec(args: string[], overlay?: EnvOverlay): Promise<GwsExecResult> {
     const bin = this.cfg.gws.bin || "gws";
     const start = Date.now();
     const maxBytes = this.cfg.gws.maxOutputBytes;
+    const env = applyOverlay(process.env, overlay ?? this.profiles.envOverlay());
 
     return await new Promise<GwsExecResult>((resolve) => {
-      const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], env });
       const stdoutBufs: Buffer[] = [];
       const stderrBufs: Buffer[] = [];
       let stdoutBytes = 0;
@@ -233,6 +250,26 @@ export class GwsClient {
     const args = ["schema", target];
     if (resolveRefs) args.push("--resolve-refs");
     return this.exec(args);
+  }
+
+  /**
+   * `gws auth status` is read-only and reports token validity per config dir, so it
+   * is the only safe way to answer "is this profile usable?" without making a call.
+   * Pass a profile name to probe one we are not currently running as.
+   */
+  async authStatus(profile?: string | null): Promise<AuthStatus> {
+    const overlay = profile ? this.profiles.envOverlayFor(profile) : undefined;
+    const result = await this.exec(["auth", "status"], overlay);
+    let parsed: Record<string, unknown> | null = null;
+    if (result.parsedJson && typeof result.parsedJson === "object") {
+      parsed = result.parsedJson as Record<string, unknown>;
+    }
+    return {
+      raw: result.stdout || result.stderr,
+      parsed,
+      tokenValid: parsed?.token_valid === true,
+      tokenError: typeof parsed?.token_error === "string" ? (parsed.token_error as string) : null,
+    };
   }
 
   async help(extraArgs: string[] = []): Promise<GwsExecResult> {

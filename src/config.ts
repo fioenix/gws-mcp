@@ -48,6 +48,11 @@ export interface Config {
     prefix: string;
     enabled: boolean;
   };
+  gcp: {
+    enabled: boolean;
+    profileScript: string;
+    timeoutMs: number;
+  };
 }
 
 /**
@@ -117,6 +122,14 @@ export function loadConfig(overrides: Partial<{ transport: Transport }> = {}): C
       dir: getEnv("GWS_MCP_SKILLS_DIR"),
       prefix: getEnv("GWS_MCP_SKILLS_PREFIX", "gws-"),
       enabled: getEnv("GWS_MCP_SKILLS_DISABLED") !== "1",
+    },
+    gcp: {
+      enabled: getEnv("GWS_MCP_GCP_BRIDGE") !== "0",
+      profileScript: getEnv(
+        "GWS_MCP_GCP_PROFILE_SH",
+        join(homedir(), ".config", "gcloud", "gcp-profile.zsh"),
+      ),
+      timeoutMs: getEnvInt("GWS_MCP_GCP_TIMEOUT_MS", 15_000),
     },
   };
 }

@@ -69,14 +69,18 @@ setTimeout(() => {
   console.log("resources:", resources.map((r) => r.uri).join(", "));
   console.log("prompts:", prompts.map((p) => p.name).join(", "));
 
-  assert.equal(tools.length, 6, "expected 6 tools");
+  assert.equal(tools.length, 10, "expected 10 tools");
   const toolNames = tools.map((t) => t.name).sort();
   assert.deepEqual(toolNames, [
     "gws_call",
+    "gws_gcp",
     "gws_get_skill",
     "gws_help",
     "gws_list_services",
     "gws_list_skills",
+    "gws_profile_current",
+    "gws_profile_list",
+    "gws_profile_use",
     "gws_schema",
   ]);
 

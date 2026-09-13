@@ -102,6 +102,27 @@ Root defaults to `~/.config/gcloud/profiles`. An unknown profile is a startup er
 silent fallback — that would run the agent as whatever identity happens to sit in the default
 config dir.
 
+## Through this MCP server
+
+Four tools cover the whole loop without leaving the session:
+
+| Tool | Use |
+|---|---|
+| `gws_profile_current` | Which identity the next call runs as, and whether its token is still valid |
+| `gws_profile_list` | Every profile on the host with its live token state — use it to find a usable one |
+| `gws_profile_use` | Switch identity for this session; takes effect immediately, no restart |
+| `gws_gcp` | Run the host's `gcp` helper (`ls`, `who`, `use`, `login`) |
+
+Two boundaries worth holding:
+
+- `gws_profile_use` changes **this session only**. `gws_gcp use` changes the **machine-wide**
+  ADC symlink and gcloud account, which every process on the host sees. They are not
+  interchangeable; prefer the former, and ask the user before the latter.
+- A failed `gws_call` already carries a diagnosis block naming the profile, the credentials
+  file, the error class, and the fix command with paths filled in. Read it instead of
+  re-running the call. On `reauth_required` the agent genuinely cannot proceed — hand the
+  command to the user and stop.
+
 ## Gotchas
 
 - Each profile needs its **own** config dir. gws caches tokens there; two profiles sharing one
