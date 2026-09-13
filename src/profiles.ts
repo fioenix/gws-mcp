@@ -8,8 +8,8 @@ import { join } from "node:path";
  *   GOOGLE_APPLICATION_CREDENTIALS  — inert for gws, but beats the ADC symlink for
  *                                     every google-auth library; a leftover makes a
  *                                     switch look like it worked when it didn't.
- *   GOOGLE_WORKSPACE_PROJECT_ID     — makes gws send a quota project; work 403s
- *                                     because phuongtd@yody.vn lacks
+ *   GOOGLE_WORKSPACE_PROJECT_ID     — makes gws send a quota project, which 403s
+ *                                     unless the signed-in account holds
  *                                     serviceusage.services.use on it.
  *   ...KEYRING_BACKEND              — mismatched backend makes gws fail to read the
  *                                     other profile's token cache and clear it.
@@ -67,15 +67,40 @@ function readLine(path: string): string | null {
  */
 export class ProfileManager {
   readonly root: string;
-  /** Host pinned GOOGLE_WORKSPACE_CLI_* paths without naming a profile. */
+  /** Host pinned GOOGLE_WORKSPACE_CLI_* paths rather than (or as well as) naming a profile. */
   readonly pinned: boolean;
+  private readonly startupName: string | null;
+  /**
+   * Paths the host set itself, as opposed to the ones resolveProfile() derived from
+   * GWS_PROFILE. `resolveProfile` runs before us and uses `||=`, so by the time we
+   * read the env both cases look identical — a value that differs from what the
+   * profile would produce is the host's own, and must keep winning. Overwriting it
+   * would silently point gws at a different token cache, i.e. a different identity.
+   */
+  private readonly pinnedCredentials: string | null;
+  private readonly pinnedConfigDir: string | null;
   private activeName: string | null;
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
     this.root = env.GWS_PROFILE_ROOT?.trim() || join(homedir(), ".config", "gcloud", "profiles");
     const named = env.GWS_PROFILE?.trim() || null;
     this.activeName = named;
-    this.pinned = !named && !!env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE?.trim();
+    this.startupName = named;
+
+    const envCredentials = env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE?.trim() || null;
+    const envConfigDir = env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR?.trim() || null;
+    const derived = named ? this.describePaths(named) : null;
+    this.pinnedCredentials = envCredentials && envCredentials !== derived?.credentialsFile ? envCredentials : null;
+    this.pinnedConfigDir = envConfigDir && envConfigDir !== derived?.configDir ? envConfigDir : null;
+    this.pinned = !!(this.pinnedCredentials || this.pinnedConfigDir);
+  }
+
+  private describePaths(name: string): { credentialsFile: string; configDir: string } {
+    const dir = join(this.root, name);
+    return {
+      credentialsFile: join(dir, "gcloud", "application_default_credentials.json"),
+      configDir: join(dir, "gws"),
+    };
   }
 
   get active(): string | null {
@@ -130,9 +155,22 @@ export class ProfileManager {
     return overlay;
   }
 
-  /** Env overlay for the profile currently selected; empty when the host pinned paths. */
+  /**
+   * Env overlay for the profile currently selected.
+   *
+   * While we are still on the startup profile, paths the host pinned itself keep
+   * winning — that is the documented contract of GOOGLE_WORKSPACE_CLI_*. Once the
+   * agent switches to a different profile it has explicitly asked for that identity,
+   * so the profile's own paths take over.
+   */
   envOverlay(): EnvOverlay {
-    return this.activeName ? this.envOverlayFor(this.activeName) : {};
+    if (!this.activeName) return {};
+    const overlay = this.envOverlayFor(this.activeName);
+    if (this.activeName === this.startupName) {
+      if (this.pinnedCredentials) overlay.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = this.pinnedCredentials;
+      if (this.pinnedConfigDir) overlay.GOOGLE_WORKSPACE_CLI_CONFIG_DIR = this.pinnedConfigDir;
+    }
+    return overlay;
   }
 
   use(name: string): ProfileInfo {

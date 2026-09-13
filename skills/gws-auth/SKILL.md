@@ -117,7 +117,11 @@ Two boundaries worth holding:
 
 - `gws_profile_use` changes **this session only**. `gws_gcp use` changes the **machine-wide**
   ADC symlink and gcloud account, which every process on the host sees. They are not
-  interchangeable; prefer the former, and ask the user before the latter.
+  interchangeable; prefer the former, and ask the user before the latter. A host can disable
+  just the mutating subcommand with `GWS_MCP_GCP_SUBCOMMANDS=ls,who`.
+- Tool calls are dispatched in parallel and the server cannot order them. If you issue several
+  calls in one batch, or any call alongside a `gws_profile_use`, pass `profile:"<name>"` on each
+  `gws_call` to pin its identity. Calling sequentially, the session default is enough.
 - A failed `gws_call` already carries a diagnosis block naming the profile, the credentials
   file, the error class, and the fix command with paths filled in. Read it instead of
   re-running the call. On `reauth_required` the agent genuinely cannot proceed — hand the

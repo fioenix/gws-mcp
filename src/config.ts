@@ -52,6 +52,7 @@ export interface Config {
     enabled: boolean;
     profileScript: string;
     timeoutMs: number;
+    subcommands: string[];
   };
 }
 
@@ -130,6 +131,9 @@ export function loadConfig(overrides: Partial<{ transport: Transport }> = {}): C
         join(homedir(), ".config", "gcloud", "gcp-profile.zsh"),
       ),
       timeoutMs: getEnvInt("GWS_MCP_GCP_TIMEOUT_MS", 15_000),
+      // Narrow to e.g. "ls,who" to keep credential diagnostics without letting an
+      // agent rewrite the machine-wide ADC symlink via `gcp use`.
+      subcommands: parseList(getEnv("GWS_MCP_GCP_SUBCOMMANDS")),
     },
   };
 }

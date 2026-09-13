@@ -12,13 +12,26 @@ export type AuthErrorKind =
   | "insufficient_scope"
   | "unauthenticated";
 
+/**
+ * Ordered: the specific causes must win over the generic "unauthenticated".
+ *
+ * Every pattern has to require auth-shaped context. A bare `401` or the loose phrase
+ * "quota project" also occurs in ordinary API errors — a Sheets `data.values[401]`
+ * type error, a Drive "storage quota project limits" message — and attaching
+ * credential advice to those sends the agent to fix something that is not broken.
+ */
 const PATTERNS: [AuthErrorKind, RegExp][] = [
-  // Ordered: the specific causes must win over the generic "unauthenticated".
-  ["reauth_required", /invalid_rapt|reauth\s+related|invalid_grant|expired or revoked/i],
-  ["quota_project", /serviceusage\.services\.use|SERVICE_DISABLED|quota[_ ]project|has not been used in project/i],
+  ["reauth_required", /invalid_rapt|reauth\s+related|invalid_grant|token has been expired or revoked/i],
+  [
+    "quota_project",
+    /serviceusage\.(services\.use|serviceUsageConsumer)|SERVICE_DISABLED|quota[_-]?[Pp]roject|has not been used in project/,
+  ],
   ["insufficient_scope", /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes|insufficient[_ ]scope/i],
-  ["missing_credentials", /credentials (file )?not found|no credentials|No OAuth client configured|credential_source"?\s*[:=]\s*"?none/i],
-  ["unauthenticated", /error\[auth\]|UNAUTHENTICATED|Authentication failed|\b401\b/i],
+  ["missing_credentials", /credentials (file )?not found|no credentials found|No OAuth client configured|credential_source"?\s*[:=]\s*"?none/i],
+  [
+    "unauthenticated",
+    /error\[auth\]|UNAUTHENTICATED|Authentication failed|"code"\s*:\s*401\b|\b401\s+Unauthorized|status(?:Code)?\s*[:=]\s*401\b/i,
+  ],
 ];
 
 export function classifyAuthError(text: string): AuthErrorKind | null {

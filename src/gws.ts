@@ -3,6 +3,15 @@ import type { Config } from "./config.js";
 import { applyOverlay, ProfileManager, type EnvOverlay } from "./profiles.js";
 
 export interface GwsCallInput {
+  /**
+   * Run this one call as a named profile instead of the session default.
+   *
+   * MCP dispatches tool calls concurrently and defines no ordering between them, so
+   * a switch and a call issued in the same batch cannot be ordered by the server.
+   * Naming the profile on the call itself is the only way to be certain which
+   * identity it runs as.
+   */
+  profile?: string | null;
   service: string;
   resource: string;
   subResource?: string | null;
@@ -240,7 +249,8 @@ export class GwsClient {
       );
     }
     const args = this.buildArgs(input);
-    return this.exec(args);
+    const overlay = input.profile ? this.profiles.envOverlayFor(input.profile) : undefined;
+    return this.exec(args, overlay);
   }
 
   async schema(target: string, resolveRefs = false): Promise<GwsExecResult> {

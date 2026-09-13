@@ -25,14 +25,27 @@ export function buildGcpScript(scriptPath: string, args: string[]): string {
 }
 
 export class GcpBridge {
+  private readonly allowed: Set<string>;
+
   constructor(
     private readonly scriptPath: string,
     private readonly enabled: boolean,
     private readonly timeoutMs: number,
-  ) {}
+    allowedSubcommands: readonly string[] = GCP_SUBCOMMANDS,
+  ) {
+    this.allowed = new Set(allowedSubcommands.length ? allowedSubcommands : GCP_SUBCOMMANDS);
+  }
 
   get available(): boolean {
     return this.enabled && existsSync(this.scriptPath);
+  }
+
+  isAllowed(sub: string): boolean {
+    return this.allowed.has(sub);
+  }
+
+  get allowedList(): string[] {
+    return GCP_SUBCOMMANDS.filter((s) => this.allowed.has(s));
   }
 
   unavailableReason(): string {
@@ -46,6 +59,21 @@ export class GcpBridge {
   }
 
   async run(sub: GcpSubcommand, rest: string[]): Promise<GcpResult> {
+    // `use` rewrites machine-wide state, so a host may allow only the read-only
+    // subcommands without giving up the bridge entirely. Policy is checked before
+    // availability: a denied subcommand stays denied regardless of host layout.
+    if (!this.isAllowed(sub)) {
+      return {
+        ok: false,
+        executed: false,
+        stdout: "",
+        stderr:
+          `\`gcp ${sub}\` is not permitted on this host (GWS_MCP_GCP_SUBCOMMANDS). ` +
+          `Allowed: ${this.allowedList.join(", ") || "(none)"}.`,
+        exitCode: null,
+      };
+    }
+
     if (!this.available) {
       return { ok: false, executed: false, stdout: "", stderr: this.unavailableReason(), exitCode: null };
     }
@@ -72,7 +100,13 @@ export class GcpBridge {
       const child = spawn("zsh", ["-c", script], { stdio: ["ignore", "pipe", "pipe"] });
       let out = "";
       let err = "";
-      const timer = setTimeout(() => child.kill("SIGKILL"), this.timeoutMs);
+      let timedOut = false;
+      // SIGKILL leaves stderr empty, so without this flag a timeout is
+      // indistinguishable from a crash: `exit=null` and no output.
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, this.timeoutMs);
       timer.unref();
       child.stdout.on("data", (c) => (out += c.toString("utf8")));
       child.stderr.on("data", (c) => (err += c.toString("utf8")));
@@ -82,7 +116,15 @@ export class GcpBridge {
       });
       child.on("close", (code) => {
         clearTimeout(timer);
-        resolve({ ok: code === 0, executed: true, stdout: out, stderr: err, exitCode: code });
+        resolve({
+          ok: code === 0 && !timedOut,
+          executed: true,
+          stdout: out,
+          stderr: timedOut
+            ? `timeout after ${this.timeoutMs}ms — raise GWS_MCP_GCP_TIMEOUT_MS if the helper is simply slow\n${err}`
+            : err,
+          exitCode: timedOut ? null : code,
+        });
       });
     });
   }

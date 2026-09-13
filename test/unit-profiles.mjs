@@ -63,7 +63,42 @@ assert.throws(() => pm.use("broken"), /no credentials/);
 assert.equal(pm.active, "personal", "a failed switch must not change the active profile");
 assert.throws(() => pm.use("../escape"), /Invalid profile name/);
 
-// 6. host pinned explicit paths with no GWS_PROFILE
+// 6. REGRESSION: a host that pinned GOOGLE_WORKSPACE_CLI_* alongside GWS_PROFILE keeps
+//    those paths. resolveProfile() uses ||= so explicit values win there; the per-spawn
+//    overlay must not quietly undo that and point gws at a different token cache.
+const both = new ProfileManager({
+  GWS_PROFILE: "work",
+  GWS_PROFILE_ROOT: root,
+  GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: "/pinned/adc.json",
+  GOOGLE_WORKSPACE_CLI_CONFIG_DIR: "/pinned/dir",
+});
+assert.equal(both.pinned, true);
+assert.equal(both.envOverlay().GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE, "/pinned/adc.json");
+assert.equal(both.envOverlay().GOOGLE_WORKSPACE_CLI_CONFIG_DIR, "/pinned/dir");
+
+// ...but switching away is an explicit request for that identity, so the profile wins
+both.use("personal");
+assert.equal(both.envOverlay().GOOGLE_WORKSPACE_CLI_CONFIG_DIR, join(root, "personal", "gws"));
+assert.equal(
+  both.envOverlay().GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE,
+  join(root, "personal", "gcloud", "application_default_credentials.json"),
+);
+
+// a host that named a profile and nothing else is not "pinned"
+const plain = new ProfileManager({ GWS_PROFILE: "work", GWS_PROFILE_ROOT: root });
+assert.equal(plain.pinned, false);
+assert.equal(plain.envOverlay().GOOGLE_WORKSPACE_CLI_CONFIG_DIR, join(root, "work", "gws"));
+
+// resolveProfile() having already written the derived paths into env is not "pinned" either
+const resolved = new ProfileManager({
+  GWS_PROFILE: "work",
+  GWS_PROFILE_ROOT: root,
+  GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: join(root, "work", "gcloud", "application_default_credentials.json"),
+  GOOGLE_WORKSPACE_CLI_CONFIG_DIR: join(root, "work", "gws"),
+});
+assert.equal(resolved.pinned, false);
+
+// 7. host pinned explicit paths with no GWS_PROFILE
 const pinned = new ProfileManager({
   GWS_PROFILE_ROOT: root,
   GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: "/pinned/adc.json",

@@ -128,7 +128,7 @@ claude mcp add gws -- gws-mcp stdio
 | `gws_list_services` | List the Google Workspace services this server is allowed to call. |
 | `gws_help` | Run `gws <args…> --help` to discover resources and methods. |
 | `gws_schema` | Return the JSON schema for `service.resource.method` — call this **before** `gws_call`. |
-| `gws_call` | Generic dispatcher: `service`, `resource`, `method`, `params`, `json`, optional `dryRun`, `pageAll`, etc. |
+| `gws_call` | Generic dispatcher: `service`, `resource`, `method`, `params`, `json`, optional `profile`, `dryRun`, `pageAll`, etc. |
 | `gws_profile_current` | Which credential profile the next call runs as, and whether its token is still valid. |
 | `gws_profile_list` | Every profile on the host, with account, project, paths, and live token state. |
 | `gws_profile_use` | Switch profile for this session — no restart, and no effect on other processes. |
@@ -206,6 +206,7 @@ See [`.env.example`](./.env.example) for the full list. The essentials:
 | `GWS_MCP_GCP_PROFILE_SH` | `~/.config/gcloud/gcp-profile.zsh` | zsh file that defines the `gcp` helper function, sourced by `gws_gcp`. |
 | `GWS_MCP_GCP_BRIDGE` | `1` | Set to `0` to drop the `gws_gcp` tool. |
 | `GWS_MCP_GCP_TIMEOUT_MS` | `15000` | Timeout for a `gcp` invocation. |
+| `GWS_MCP_GCP_SUBCOMMANDS` | all four | Narrow to e.g. `ls,who` to keep diagnostics without letting an agent run the machine-wide `gcp use`. |
 
 ### Running several Google accounts
 
@@ -237,9 +238,19 @@ one directory will read each other's identity.
 
 `GWS_PROFILE` only sets the starting profile. The child env is rebuilt on every call, so
 `gws_profile_use` switches identity mid-session with no restart, and the switch is scoped to
-this server — it never touches the machine-wide ADC symlink or any other process. Issue the
-switch and wait for it to return before the next `gws_call`: a switch batched in parallel with
-calls has no defined ordering.
+this server — it never touches the machine-wide ADC symlink or any other process.
+
+A host that also pins `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` or `..._CONFIG_DIR` keeps those
+paths while the session is still on its starting profile, matching the precedence `GWS_PROFILE`
+has always had. Switching away is an explicit request for that identity, so from then on the
+profile's own paths win.
+
+**Identity under concurrency.** MCP dispatches tool calls in parallel and defines no ordering
+between them, so a `gws_profile_use` batched alongside `gws_call`s cannot be ordered by the
+server. Two guarantees instead: no call ever straddles a switch (calls hold a shared gate, a
+switch takes it exclusively), and `gws_call` accepts an optional `profile` that pins one call to
+one identity regardless of what else is in flight. Pin it whenever you batch, and the session
+default is enough when you call sequentially.
 
 When a call fails on auth, the error carries a diagnosis block naming the profile, the
 credentials file actually read, the class of failure (`reauth_required`, `quota_project`,

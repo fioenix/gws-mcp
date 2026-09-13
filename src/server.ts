@@ -8,6 +8,7 @@ import { GwsClient, type GwsCallInput, type GwsExecResult } from "./gws.js";
 import { ProfileManager, type ProfileInfo } from "./profiles.js";
 import { GcpBridge, GCP_SUBCOMMANDS, type GcpSubcommand } from "./gcpbridge.js";
 import { classifyAuthError, renderDiagnosis } from "./authdiag.js";
+import { IdentityGate } from "./identitygate.js";
 import { AuditLogger } from "./audit.js";
 import type { Skill } from "./skills.js";
 
@@ -145,7 +146,8 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
 
   const profiles = new ProfileManager();
   const gws = new GwsClient(cfg, profiles);
-  const gcp = new GcpBridge(cfg.gcp.profileScript, cfg.gcp.enabled, cfg.gcp.timeoutMs);
+  const gcp = new GcpBridge(cfg.gcp.profileScript, cfg.gcp.enabled, cfg.gcp.timeoutMs, cfg.gcp.subcommands);
+  const gate = new IdentityGate();
   const audit = new AuditLogger(cfg.safety.auditLog);
 
   /**
@@ -153,14 +155,14 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
    * what to do next, so it retries blindly. Append the profile, the file that was
    * read, the error class, and the fix command with paths already filled in.
    */
-  async function withDiagnosis(result: GwsExecResult) {
+  async function withDiagnosis(result: GwsExecResult, ranAs?: string | null) {
     const base = execToContent(result);
     if (result.ok) return base;
 
     const kind = classifyAuthError(`${result.stderr}\n${result.stdout}`);
     if (!kind) return base;
 
-    const active = profiles.active;
+    const active = ranAs ?? profiles.active;
     const info: ProfileInfo | null = active ? profiles.describe(active) : null;
 
     // Only worth probing other profiles when the agent might reasonably switch.
@@ -303,6 +305,13 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       description:
         "Generic dispatcher to the host's `gws` CLI. Always call `gws_schema` first to learn the exact param/body shape.",
       inputSchema: {
+        profile: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9._-]*$/i)
+          .optional()
+          .describe(
+            "Run this single call as a named credential profile, ignoring the session default. Pin it whenever you issue several calls in one batch, or any call after a `gws_profile_use` in the same batch: tool calls are dispatched concurrently and the server cannot order them, so an unpinned call may run as either identity.",
+          ),
         service: z
           .string()
           .regex(/^[a-z0-9][a-z0-9._-]*$/i)
@@ -359,6 +368,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
     async (input) => {
       const start = Date.now();
       const callInput: GwsCallInput = {
+        profile: input.profile ?? null,
         service: input.service,
         resource: input.resource,
         subResource: input.subResource ?? null,
@@ -376,11 +386,18 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
         dryRun: input.dryRun ?? null,
       };
       try {
-        const result = await gws.call(callInput);
+        // A pinned call carries its own identity and is immune to a concurrent switch.
+        // An unpinned one reads the session default, so it takes the gate to make sure
+        // it does not straddle one.
+        const result = input.profile
+          ? await gws.call(callInput)
+          : await gate.shared(() => gws.call(callInput));
         await audit.log({
           event: "tool_call",
           tool: "gws_call",
           args: {
+            profile: input.profile ?? profiles.active,
+            pinned: !!input.profile,
             service: input.service,
             resource: input.resource,
             subResource: input.subResource,
@@ -394,7 +411,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
           exitCode: result.exitCode,
           durationMs: Date.now() - start,
         });
-        return await withDiagnosis(result);
+        return await withDiagnosis(result, input.profile ?? profiles.active);
       } catch (e) {
         const err = (e as Error).message;
         await audit.log({
@@ -449,19 +466,21 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
           isError: true,
         };
       }
-      const blocks: string[] = [];
-      for (const p of list) {
-        let token: { valid: boolean; error: string | null } | undefined;
-        if (checkTokens && p.credentialsExist) {
-          try {
-            const st = await gws.authStatus(p.name);
-            token = { valid: st.tokenValid, error: st.tokenError };
-          } catch (e) {
-            token = { valid: false, error: (e as Error).message };
-          }
-        }
-        blocks.push(formatProfile(p, token));
-      }
+      // Concurrently: one `gws auth status` subprocess per profile in series makes
+      // the first tool an agent reaches for when calls fail the slowest one.
+      const blocks = await gate.shared(async () =>
+        Promise.all(
+          list.map(async (p) => {
+            if (!checkTokens || !p.credentialsExist) return formatProfile(p);
+            try {
+              const st = await gws.authStatus(p.name);
+              return formatProfile(p, { valid: st.tokenValid, error: st.tokenError });
+            } catch (e) {
+              return formatProfile(p, { valid: false, error: (e as Error).message });
+            }
+          }),
+        ),
+      );
       await audit.log({ event: "tool_call", tool: "gws_profile_list", ok: true, args: { checkTokens } });
       return {
         content: [
@@ -511,7 +530,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       }
 
       const info = profiles.describe(active);
-      const status = await gws.authStatus(active);
+      const status = await gate.shared(() => gws.authStatus(active));
       return {
         content: [
           {
@@ -543,8 +562,12 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
     async ({ name }) => {
       const previous = profiles.active;
       try {
-        const info = profiles.use(name);
-        const status = await gws.authStatus(name);
+        // Exclusive: drain in-flight calls, then hold off new ones, so no gws_call
+        // can straddle the switch and run as the identity we just left.
+        const { info, status } = await gate.exclusive(async () => {
+          const switched = profiles.use(name);
+          return { info: switched, status: await gws.authStatus(name) };
+        });
         await audit.log({
           event: "profile_switch",
           tool: "gws_profile_use",

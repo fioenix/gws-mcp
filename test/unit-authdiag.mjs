@@ -25,6 +25,23 @@ assert.equal(classifyAuthError("error[auth]: something odd"), "unauthenticated")
 assert.equal(classifyAuthError("Error 404: File not found: abc123"), null);
 assert.equal(classifyAuthError(""), null);
 
+// 3b. REGRESSION: a bare 401 and the loose phrase "quota project" occur in ordinary
+//     API errors. Attaching credential advice to those sends the agent to fix
+//     something that is not broken.
+assert.equal(classifyAuthError("Invalid value at 'data.values[401]' (TYPE_INT64)"), null);
+assert.equal(classifyAuthError("Invalid requests[0].insertText: index 401 must be less than end"), null);
+assert.equal(classifyAuthError("File not found: Budget 401 Plan.xlsx"), null);
+assert.equal(classifyAuthError("The user has exceeded their Drive storage quota project limits"), null);
+
+// ...while auth-shaped 401s and real quota-project errors still land
+assert.equal(classifyAuthError('{"error":{"code":401,"message":"Request had invalid credentials"}}'), "unauthenticated");
+assert.equal(classifyAuthError("HTTP 401 Unauthorized"), "unauthenticated");
+assert.equal(
+  classifyAuthError("Grant the caller the roles/serviceusage.serviceUsageConsumer role"),
+  "quota_project",
+);
+assert.equal(classifyAuthError("quotaProject fioenix is not enabled"), "quota_project");
+
 const profile = {
   name: "work",
   account: "phuongtd@yody.vn",
