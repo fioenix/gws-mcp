@@ -5,6 +5,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Config } from "./config.js";
 import { GwsClient, type GwsCallInput, type GwsExecResult } from "./gws.js";
+import { ProfileManager, type ProfileInfo } from "./profiles.js";
+import { GcpBridge, GCP_SUBCOMMANDS, type GcpSubcommand } from "./gcpbridge.js";
+import { classifyAuthError, renderDiagnosis } from "./authdiag.js";
+import { IdentityGate } from "./identitygate.js";
 import { AuditLogger } from "./audit.js";
 import type { Skill } from "./skills.js";
 
@@ -132,6 +136,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
         "Outputs are JSON by default — set `format` to `table`/`yaml`/`csv` only when the user asks for human-readable output.",
         "For paginated list calls, set `pageAll: true` to auto-paginate into NDJSON.",
         "Destructive operations (delete/send) may be blocked by host policy and will return an error.",
+        "Credentials live in named profiles. `gws_profile_current` says which identity is active and whether its token is still valid, `gws_profile_list` shows the alternatives, and `gws_profile_use` switches for this session with no restart. On an auth failure, read the diagnosis block appended to the error before doing anything else — never switch identity without asking the user.",
         skillsBlurb,
       ]
         .join("\n")
@@ -139,8 +144,58 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
     },
   );
 
-  const gws = new GwsClient(cfg);
+  const profiles = new ProfileManager();
+  const gws = new GwsClient(cfg, profiles);
+  const gcp = new GcpBridge(cfg.gcp.profileScript, cfg.gcp.enabled, cfg.gcp.timeoutMs, cfg.gcp.subcommands);
+  const gate = new IdentityGate();
   const audit = new AuditLogger(cfg.safety.auditLog);
+
+  /**
+   * A raw Google auth error tells the agent nothing about *which* identity failed or
+   * what to do next, so it retries blindly. Append the profile, the file that was
+   * read, the error class, and the fix command with paths already filled in.
+   */
+  async function withDiagnosis(result: GwsExecResult, ranAs?: string | null) {
+    const base = execToContent(result);
+    if (result.ok) return base;
+
+    const kind = classifyAuthError(`${result.stderr}\n${result.stdout}`);
+    if (!kind) return base;
+
+    const active = ranAs ?? profiles.active;
+    const info: ProfileInfo | null = active ? profiles.describe(active) : null;
+
+    // Only worth probing other profiles when the agent might reasonably switch.
+    // Concurrently: this sits on the error path, and one subprocess per profile
+    // in series would add seconds to every failed call.
+    let healthy: { name: string; account: string | null }[] | undefined;
+    if (kind === "reauth_required" || kind === "missing_credentials") {
+      const candidates = profiles.list().filter((p) => p.name !== active && p.credentialsExist);
+      const probes = await Promise.all(
+        candidates.map(async (p) => {
+          try {
+            return (await gws.authStatus(p.name)).tokenValid ? p : null;
+          } catch {
+            return null; // a probe failure is not the error we are reporting
+          }
+        }),
+      );
+      healthy = probes.filter((p) => p !== null).map((p) => ({ name: p.name, account: p.account }));
+    }
+
+    const diagnosis = renderDiagnosis({
+      kind,
+      profile: info,
+      credentialsFile: info?.credentialsFile ?? process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? null,
+      configDir: info?.configDir ?? process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR ?? null,
+      healthyAlternatives: healthy,
+    });
+
+    return {
+      ...base,
+      content: [{ type: "text" as const, text: `${base.content[0].text}\n${diagnosis}` }],
+    };
+  }
 
   server.registerTool(
     "gws_list_services",
@@ -250,6 +305,13 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       description:
         "Generic dispatcher to the host's `gws` CLI. Always call `gws_schema` first to learn the exact param/body shape.",
       inputSchema: {
+        profile: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9._-]*$/i)
+          .optional()
+          .describe(
+            "Run this single call as a named credential profile, ignoring the session default. Pin it whenever you issue several calls in one batch, or any call after a `gws_profile_use` in the same batch: tool calls are dispatched concurrently and the server cannot order them, so an unpinned call may run as either identity.",
+          ),
         service: z
           .string()
           .regex(/^[a-z0-9][a-z0-9._-]*$/i)
@@ -306,6 +368,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
     async (input) => {
       const start = Date.now();
       const callInput: GwsCallInput = {
+        profile: input.profile ?? null,
         service: input.service,
         resource: input.resource,
         subResource: input.subResource ?? null,
@@ -323,11 +386,18 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
         dryRun: input.dryRun ?? null,
       };
       try {
-        const result = await gws.call(callInput);
+        // A pinned call carries its own identity and is immune to a concurrent switch.
+        // An unpinned one reads the session default, so it takes the gate to make sure
+        // it does not straddle one.
+        const result = input.profile
+          ? await gws.call(callInput)
+          : await gate.shared(() => gws.call(callInput));
         await audit.log({
           event: "tool_call",
           tool: "gws_call",
           args: {
+            profile: input.profile ?? profiles.active,
+            pinned: !!input.profile,
             service: input.service,
             resource: input.resource,
             subResource: input.subResource,
@@ -341,7 +411,7 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
           exitCode: result.exitCode,
           durationMs: Date.now() - start,
         });
-        return execToContent(result);
+        return await withDiagnosis(result, input.profile ?? profiles.active);
       } catch (e) {
         const err = (e as Error).message;
         await audit.log({
@@ -355,6 +425,238 @@ export function buildServer(cfg: Config, opts: BuildServerOptions = {}): McpServ
       }
     },
   );
+
+  // -------- Profile layer --------
+
+  function formatProfile(p: ProfileInfo, token?: { valid: boolean; error: string | null }): string {
+    const marks = [p.active ? "ACTIVE" : null, p.credentialsExist ? null : "no-credentials"].filter(Boolean);
+    const head = `${p.name}${marks.length ? `  [${marks.join(", ")}]` : ""}`;
+    const lines = [
+      `- ${head}`,
+      `    account     : ${p.account ?? "(unknown)"}`,
+      `    project     : ${p.project ?? "(unset)"}`,
+      `    credentials : ${p.credentialsFile}${p.credentialsExist ? "" : "  (MISSING)"}`,
+      `    config dir  : ${p.configDir}${p.configDirExists ? "" : "  (MISSING)"}`,
+    ];
+    if (token) {
+      lines.push(`    token       : ${token.valid ? "valid" : `INVALID — ${token.error ?? "unknown error"}`}`);
+    }
+    return lines.join("\n");
+  }
+
+  server.registerTool(
+    "gws_profile_list",
+    {
+      title: "List credential profiles",
+      description:
+        "List the credential profiles on this host (directories under GWS_PROFILE_ROOT, default ~/.config/gcloud/profiles), with the account, project, credential paths, and — unless you turn it off — the live token state of each. Use it to find out which identity is usable before asking the user to re-authenticate.",
+      inputSchema: {
+        checkTokens: z
+          .boolean()
+          .default(true)
+          .describe("Probe each profile with `gws auth status` (read-only, one subprocess per profile)"),
+      },
+    },
+    async ({ checkTokens }) => {
+      const list = profiles.list();
+      if (list.length === 0) {
+        await audit.log({ event: "tool_call", tool: "gws_profile_list", ok: false, error: "no_profiles" });
+        return {
+          content: [{ type: "text", text: `No profiles found under ${profiles.root}.` }],
+          isError: true,
+        };
+      }
+      // Concurrently: one `gws auth status` subprocess per profile in series makes
+      // the first tool an agent reaches for when calls fail the slowest one.
+      const blocks = await gate.shared(async () =>
+        Promise.all(
+          list.map(async (p) => {
+            if (!checkTokens || !p.credentialsExist) return formatProfile(p);
+            try {
+              const st = await gws.authStatus(p.name);
+              return formatProfile(p, { valid: st.tokenValid, error: st.tokenError });
+            } catch (e) {
+              return formatProfile(p, { valid: false, error: (e as Error).message });
+            }
+          }),
+        ),
+      );
+      await audit.log({ event: "tool_call", tool: "gws_profile_list", ok: true, args: { checkTokens } });
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Profiles under ${profiles.root} (${list.length}):\n\n` +
+              blocks.join("\n\n") +
+              `\n\nSwitch with \`gws_profile_use name:"<name>"\` — it affects this MCP session only, not other processes on the machine.`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "gws_profile_current",
+    {
+      title: "Show the active credential profile",
+      description:
+        "Report which profile the next `gws_call` will run as, the credentials file and config dir it reads, the authenticated account, and whether the token is still valid.",
+      inputSchema: {},
+    },
+    async () => {
+      const active = profiles.active;
+      await audit.log({ event: "tool_call", tool: "gws_profile_current", ok: true, args: { active } });
+
+      if (!active) {
+        const status = await gws.authStatus();
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                profiles.pinned
+                  ? "No profile selected — the host pinned GOOGLE_WORKSPACE_CLI_* paths directly."
+                  : "No profile selected — gws is using its own default config dir.",
+                `credentials : ${process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE ?? "(gws default)"}`,
+                `config dir  : ${process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR ?? "(gws default)"}`,
+                `token       : ${status.tokenValid ? "valid" : `INVALID — ${status.tokenError ?? "unknown error"}`}`,
+                "",
+                "`gws_profile_use` can still select a profile for this session.",
+              ].join("\n"),
+            },
+          ],
+        };
+      }
+
+      const info = profiles.describe(active);
+      const status = await gate.shared(() => gws.authStatus(active));
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              formatProfile(info, { valid: status.tokenValid, error: status.tokenError }) +
+              (status.tokenValid
+                ? ""
+                : `\n\nThis profile cannot make calls until the user re-authenticates. Run \`gws_profile_list\` to see whether another profile is usable.`),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "gws_profile_use",
+    {
+      title: "Switch credential profile",
+      description:
+        "Point subsequent `gws_call` invocations at a different credential profile, for this MCP session only. Takes effect immediately — no restart — because the child env is rebuilt on every call. It does NOT touch the machine-wide ADC symlink or any other process. Switching identity changes whose data you read and write: ask the user first. Wait for this call to return before issuing the next `gws_call` — a switch batched in parallel with calls has no defined ordering, and those calls may run as the old identity.",
+      inputSchema: {
+        name: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9._-]*$/i)
+          .describe("Profile name as listed by `gws_profile_list`, e.g. work, personal"),
+      },
+    },
+    async ({ name }) => {
+      const previous = profiles.active;
+      try {
+        // Exclusive: drain in-flight calls, then hold off new ones, so no gws_call
+        // can straddle the switch and run as the identity we just left.
+        const { info, status } = await gate.exclusive(async () => {
+          const switched = profiles.use(name);
+          return { info: switched, status: await gws.authStatus(name) };
+        });
+        await audit.log({
+          event: "profile_switch",
+          tool: "gws_profile_use",
+          ok: true,
+          args: { from: previous, to: name, tokenValid: status.tokenValid },
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Switched ${previous ?? "(none)"} -> ${name} for this MCP session.\n\n` +
+                formatProfile({ ...info, active: true }, { valid: status.tokenValid, error: status.tokenError }) +
+                (status.tokenValid
+                  ? ""
+                  : `\n\nWarning: this profile's token is not valid, so calls will still fail. Ask the user to run \`gcp login ${name}\`.`),
+            },
+          ],
+        };
+      } catch (e) {
+        const err = (e as Error).message;
+        await audit.log({
+          event: "profile_switch",
+          tool: "gws_profile_use",
+          ok: false,
+          args: { from: previous, to: name },
+          error: err,
+        });
+        return { content: [{ type: "text", text: `Error: ${err}` }], isError: true };
+      }
+    },
+  );
+
+  // -------- gcp CLI bridge --------
+  // `gcp` is a zsh function, not a binary, so it has to be sourced before it exists.
+  // Exposed mainly so the agent can read host-wide state; `gws_profile_use` is the
+  // right tool for changing what THIS session runs as.
+  if (cfg.gcp.enabled) {
+    server.registerTool(
+      "gws_gcp",
+      {
+        title: "Run the host's gcp profile helper",
+        description:
+          "Run the host's `gcp` zsh helper (ls | who | use | login) for credential diagnostics. `ls` and `who` report machine-wide state. `use` rewrites the machine-wide ADC symlink and gcloud account — it affects every process on the host and does NOT change this session (use `gws_profile_use` for that); ask the user before running it. `login` needs a browser, so this tool returns the command instead of executing it.",
+        inputSchema: {
+          subcommand: z.enum(GCP_SUBCOMMANDS).describe("gcp subcommand"),
+          args: z
+            .array(z.string().regex(/^[a-z0-9][a-z0-9._-]*$/i, "lowercase identifiers only"))
+            .max(2)
+            .default([])
+            .describe("Extra args, e.g. the profile name for `use` / `login`"),
+        },
+      },
+      async ({ subcommand, args }) => {
+        const start = Date.now();
+        const result = await gcp.run(subcommand as GcpSubcommand, args);
+        await audit.log({
+          event: "tool_call",
+          tool: "gws_gcp",
+          args: { subcommand, args },
+          ok: result.ok,
+          exitCode: result.exitCode,
+          durationMs: Date.now() - start,
+        });
+
+        if (result.note) {
+          return { content: [{ type: "text", text: result.note }] };
+        }
+        if (!result.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `gcp ${[subcommand, ...args].join(" ")} failed (exit=${result.exitCode})\n\n${result.stderr || result.stdout || "(no output)"}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        const suffix =
+          subcommand === "use"
+            ? `\n\nNote: this changed machine-wide state only. This MCP session still runs as profile "${profiles.active ?? "(none)"}" — use \`gws_profile_use\` to change it.`
+            : "";
+        return {
+          content: [{ type: "text", text: (result.stdout || "(no output)") + (result.stderr ? `\n${result.stderr}` : "") + suffix }],
+        };
+      },
+    );
+  }
 
   server.registerResource(
     "gws-services",
